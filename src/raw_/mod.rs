@@ -1,5 +1,5 @@
 use std::cmp::Eq;
-use odds::vec::VecExt;
+// use retain_external::RetainExternal;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawTree<N: Eq> {
@@ -25,7 +25,7 @@ struct Jump {
     next_major_node_dist: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RawCursor {
     node_index: usize,
     parent_jump_index: usize
@@ -85,7 +85,7 @@ impl<N: Eq> RawTree<N> {
 
         while jump.next_major_node != MajorNode::Leaf {
             jump_index = self.jumps[jump_index + 1..].windows(2).zip(jump_index + 1..)
-                .skip_while(|&(x, _)| x[0].branch_from_node != jump.jump_to_node as isize)
+                .skip_while(|&(x, _)| x[0].branch_from_node != jump.branch_from_node)
                 .find(|&(x, _)| x[0].branch_from_node != x[1].branch_from_node)
                 .map(|(_, i)| i).unwrap_or(self.jumps.len() - 1);
 
@@ -130,7 +130,7 @@ impl<N: Eq> RawTree<N> {
             }
         }
 
-        for jump in &mut self.jumps[..] {
+        for jump in &mut self.jumps[cursor.parent_jump_index + 1..] {
             debug_assert!(jump.branch_from_node < jump.jump_to_node as isize);
 
             if (insert_node_index as isize) <= jump.branch_from_node {
@@ -162,72 +162,35 @@ impl<N: Eq> RawTree<N> {
         debug_assert!(self.jumps.windows(2).all(|x| x[0] <= x[1]));
     }
 
-    pub fn prune_node(&mut self, cursor: RawCursor) {
-        let node_right_leaf = self.node_right_leaf(cursor);
-        let next_jump_index_opt: Option<usize>;
+    // pub fn prune_node(&mut self, cursor: RawCursor) {
+    //     use std::vec::VecDeque;
 
-        let parent_jump = self.jumps[cursor.parent_jump_index];
-        {
-            next_jump_index_opt = match parent_jump.next_major_node {
-                MajorNode::Jump => {
-                    let next_major_node_index = parent_jump.jump_to_node + parent_jump.next_major_node_dist;
-                    Some(
-                        self.jumps[cursor.parent_jump_index + 1..]
-                            .iter().zip(cursor.parent_jump_index + 1..)
-                            .skip_while(|&(x, _)| x.branch_from_node != next_major_node_index as isize)
-                            .next().unwrap().1
-                    )
-                },
-                MajorNode::Leaf => None
-            };
+    //     let node_right_leaf = self.node_right_leaf(cursor);
+    //     self.nodes.splice(cursor.node_index..node_right_leaf.node_index + 1, None);
 
-            let parent_jump_mut = &mut self.jumps[cursor.parent_jump_index];
-            parent_jump_mut.next_major_node = MajorNode::Leaf;
-            parent_jump_mut.next_major_node_dist = cursor.node_index - parent_jump.jump_to_node;
-        }
+    //     {
+    //         let mut parent_jump = &mut self.jumps[cursor.parent_jump_index];
+    //         parent_jump.next_major_node = MajorNode::Leaf;
+    //         parent_jump.next_major_node_dist = cursor.node_index - parent_jump.jump_to_node;
+    //     }
 
+    //     let mut remove_branch_from = VecDeque::new();
+    //     remove_branch_from.push_back(cursor.node_index);
 
-        self.nodes.splice(cursor.node_index..node_right_leaf.node_index + 1, None);
-
-        let nodes_removed = (node_right_leaf.node_index + 1) - cursor.node_index;
-        if let Some(node_next_jump_index) = next_jump_index_opt {
-            println!("nr {}", nodes_removed);
-
-            let remove_parent_jump = cursor.node_index == parent_jump.jump_to_node;
-
-            let mut retain_index = 0;
-            self.jumps.retain_mut(|jump| {
-                let retain =
-                    !(remove_parent_jump && retain_index == cursor.parent_jump_index) &&
-                    (
-                        retain_index < node_next_jump_index ||
-                        (node_right_leaf.node_index as isize) < jump.branch_from_node
-                    );
-                if retain {
-                    if (node_right_leaf.node_index as isize) <= jump.branch_from_node {
-                        jump.branch_from_node -= nodes_removed as isize;
-                    }
-                    if node_right_leaf.node_index <= jump.jump_to_node {
-                        jump.jump_to_node -= nodes_removed;
-                    }
-                }
-                retain_index += 1;
-                retain
-            });
-        } else {
-            for jump in &mut self.jumps[..] {
-                if (node_right_leaf.node_index as isize) <= jump.branch_from_node {
-                    jump.branch_from_node -= nodes_removed as isize;
-                }
-                if node_right_leaf.node_index <= jump.jump_to_node {
-                    jump.jump_to_node -= nodes_removed;
-                }
-            }
-        }
-    }
+    //     let mut retain_external = RetainExternal::new(&mut self.jumps, cursor.parent_jump_index..);
+    //     while let Some(retain_jump) = retain_external.next() {
+    //         let jump = *retain_jump.element();
+    //         if jump.branch_from_node == remove_branch_from.back().unwrap() {
+    //             retain_jump.discard();
+    //         } else {
+    //             retain_jump.retain();
+    //         }
+    //     }
+    // }
 }
 
 impl Jump {
+    #[inline]
     fn root() -> Jump {
         Jump {
             branch_from_node: -1,
@@ -295,6 +258,7 @@ impl Jump {
 }
 
 impl RawCursor {
+    #[inline]
     pub fn root() -> RawCursor {
         RawCursor {
             node_index: 0,
