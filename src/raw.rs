@@ -133,13 +133,8 @@ impl<N: Eq> RawTree<N> {
             self.jumps.insert(insert_index, jump);
         }
 
-
-        #[cfg(debug)]
-        {
-            let mut jumps_sorted = self.jumps.clone();
-            jumps_sorted.sort();
-            assert!(self.jumps == jumps_sorted);
-        }
+        // Sanity check to see if the jump list is sorted.
+        debug_assert!(self.jumps.windows(2).all(|x| x[0] <= x[1]));
     }
 }
 
