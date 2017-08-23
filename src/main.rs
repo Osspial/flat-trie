@@ -23,6 +23,8 @@ fn main() {
     {
         let mut cursor = cursor.enter_node("level_two").unwrap();
         cursor.insert_node("a");
+        cursor.insert_node("b");
+        cursor.insert_node("c");
 
         {
             let mut cursor = cursor.enter_node("a").unwrap();

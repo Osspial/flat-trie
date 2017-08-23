@@ -15,11 +15,11 @@ enum MajorNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Jump {
-    branch_node_index: isize,
+    branch_from_node: isize,
     depth: isize,
-    jump_node_index: usize,
+    jump_to_node: usize,
     next_major_node: MajorNode,
-    /// The distance from the node at `jump_node_index` to to next node that's eithe a leaf or a
+    /// The distance from the node at `jump_to_node` to to next node that's eithe a leaf or a
     /// split
     next_major_node_dist: usize,
 }
@@ -44,7 +44,6 @@ impl<N: Eq> RawTree<N> {
 
     pub fn node_direct_children<'a>(&'a self, cursor: RawCursor) -> impl 'a + Iterator<Item=RawCursor> {
         use std::ops::RangeFrom;
-
         let parent_jump = self.jumps[cursor.parent_jump_index];
 
         let direct_child: Option<RawCursor>;
@@ -54,7 +53,7 @@ impl<N: Eq> RawTree<N> {
                 direct_child = Some(RawCursor {
                     node_index: cursor.node_index + 1,
                     parent_jump_index: cursor.parent_jump_index
-                });
+                }).into_iter().filter(|_| parent_jump.cursor_has_children(cursor)).next();
                 child_jump_search = self.jumps.len()..;
             }
             (MajorNode::Leaf, true) => {
@@ -67,18 +66,19 @@ impl<N: Eq> RawTree<N> {
             }
         }
 
+
         let jump_child_iter = self.jumps[child_jump_search.clone()].iter().cloned()
             .zip(child_jump_search)
-            .skip_while(move |&(s, _)| s.branch_node_index != cursor.node_index as isize)
-            .take_while(move |&(s, _)| s.branch_node_index == cursor.node_index as isize)
+            .skip_while(move |&(s, _)| s.branch_from_node != cursor.node_index as isize)
+            .take_while(move |&(s, _)| s.branch_from_node == cursor.node_index as isize)
             .map(|(s, i)| RawCursor {
-                node_index: s.jump_node_index,
+                node_index: s.jump_to_node,
                 parent_jump_index: i
             });
         direct_child.into_iter().chain(jump_child_iter)
     }
 
-    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N) where N: ::std::fmt::Debug {
+    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N) {
         let mut num_children = 0;
         for child_cursor in self.node_direct_children(cursor) {
             num_children += 1;
@@ -92,16 +92,17 @@ impl<N: Eq> RawTree<N> {
             0 => {
                 let insert_node_index = cursor.node_index + 1;
                 for jump in &mut self.jumps {
-                    if (insert_node_index as isize) <= jump.branch_node_index {
-                        jump.branch_node_index += 1;
+                    if (insert_node_index as isize) <= jump.branch_from_node {
+                        jump.branch_from_node += 1;
                     }
-                    if insert_node_index <= jump.jump_node_index {
-                        jump.jump_node_index += 1;
+                    if insert_node_index <= jump.jump_to_node {
+                        jump.jump_to_node += 1;
                     }
                 }
 
                 self.nodes.insert(insert_node_index, node);
-                insert_continue_jump = true;
+                self.jumps[cursor.parent_jump_index].next_major_node_dist += 1;
+                insert_continue_jump = false;
                 insert_split_jump = false;
             },
             1 => {
@@ -145,59 +146,66 @@ impl<N: Eq> RawTree<N> {
 impl Jump {
     fn root() -> Jump {
         Jump {
-            branch_node_index: -1,
+            branch_from_node: -1,
             depth: -1,
-            jump_node_index: 0,
+            jump_to_node: 0,
             next_major_node: MajorNode::Leaf,
             next_major_node_dist: 0
         }
     }
 
-    fn new_child_continue(&mut self, branch_node_index: usize) -> Jump {
-        self.next_major_node_dist = branch_node_index - self.jump_node_index;
-        let jump_node_index = branch_node_index + 1;
+    fn new_child_continue(&mut self, branch_from_node: usize) -> Jump {
+        self.next_major_node_dist = branch_from_node - self.jump_to_node;
+        let jump_to_node = branch_from_node + 1;
 
-        let branch_node_index = branch_node_index as isize;
-        let child_depth = (jump_node_index - self.jump_node_index) as isize + self.depth;
+        let branch_from_node = branch_from_node as isize;
+        let child_depth = (jump_to_node - self.jump_to_node) as isize + self.depth;
 
         let jump_next_major_node = self.next_major_node;
         self.next_major_node = MajorNode::Jump;
 
         assert!(self.depth < child_depth && child_depth <= self.depth + 1 + self.next_major_node_dist as isize);
-        assert!(self.jump_node_index < jump_node_index && jump_node_index <= self.jump_node_index + 1 + self.next_major_node_dist);
+        assert!(self.jump_to_node < jump_to_node && jump_to_node <= self.jump_to_node + 1 + self.next_major_node_dist);
 
         Jump {
-            branch_node_index,
+            branch_from_node,
             depth: child_depth,
-            jump_node_index,
+            jump_to_node,
             next_major_node: jump_next_major_node,
             next_major_node_dist: 0
         }
     }
 
-    fn new_child_jump(&mut self, branch_node_index: usize, jump_node_index: usize) -> Jump {
-        self.next_major_node_dist = branch_node_index - self.jump_node_index;
+    fn new_child_jump(&mut self, branch_from_node: usize, jump_to_node: usize) -> Jump {
+        self.next_major_node_dist = branch_from_node - self.jump_to_node;
 
-        let branch_node_index = branch_node_index as isize;
-        let child_depth = branch_node_index - self.jump_node_index as isize + 1 + self.depth;
+        let branch_from_node = branch_from_node as isize;
+        let child_depth = branch_from_node - self.jump_to_node as isize + 1 + self.depth;
 
         self.next_major_node = MajorNode::Jump;
 
         assert!(self.depth < child_depth && child_depth <= self.depth + 1 + self.next_major_node_dist as isize);
-        assert!(self.next_major_node_dist + self.jump_node_index < jump_node_index);
+        assert!(self.next_major_node_dist + self.jump_to_node < jump_to_node);
 
         Jump {
-            branch_node_index,
+            branch_from_node,
             depth: child_depth,
-            jump_node_index,
+            jump_to_node,
             next_major_node: MajorNode::Leaf,
             next_major_node_dist: 0
         }
     }
 
+    #[inline]
     fn cursor_at_next_major_node(&self, cursor: RawCursor) -> bool {
-        let cursor_dist = cursor.node_index - self.jump_node_index;
+        let cursor_dist = cursor.node_index - self.jump_to_node;
         self.next_major_node_dist == cursor_dist
+    }
+
+    #[inline]
+    fn cursor_has_children(&self, cursor: RawCursor) -> bool {
+        let cursor_dist = cursor.node_index - self.jump_to_node;
+        cursor_dist < self.next_major_node_dist || self.next_major_node == MajorNode::Jump
     }
 }
 
