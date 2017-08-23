@@ -11,13 +11,29 @@ fn main() {
     let mut tree = LongTree::new("root");
     let mut cursor = tree.cursor_mut();
     cursor.insert_node("level_one");
-    // cursor.insert_node("level_two");
+    cursor.insert_node("level_two");
     {
         let mut cursor = cursor.enter_node("level_one").unwrap();
         cursor.insert_node("goodbye");
         cursor.insert_node("hello");
         for child in cursor.direct_children() {
             println!("    {}", child);
+        }
+    }
+    {
+        let mut cursor = cursor.enter_node("level_two").unwrap();
+        cursor.insert_node("a");
+
+        {
+            let mut cursor = cursor.enter_node("a").unwrap();
+            cursor.insert_node("furthermore");
+            for child in cursor.direct_children() {
+                println!("      {}", child);
+            }
+        }
+
+        for child in cursor.direct_children() {
+            println!("     {}", child);
         }
     }
     for child in cursor.direct_children() {
@@ -58,7 +74,7 @@ impl<'a, N: Eq> CursorMut<'a, N> {
         child.map(move |rc| CursorMut{ tree: self.tree, raw: rc })
     }
 
-    pub fn insert_node(&mut self, node: N) where N: ::std::fmt::Debug {
+    pub fn insert_node(&mut self, node: N) {
         self.tree.insert_node_after(self.raw, node);
     }
 }

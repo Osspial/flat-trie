@@ -88,11 +88,19 @@ impl<N: Eq> RawTree<N> {
         }
 
         let (insert_continue_jump, insert_split_jump): (bool, bool);
-        println!("{:?} -> {:?} {}", node, self.nodes[cursor.node_index], num_children);
-        println!("{:#?}", self);
         match num_children {
             0 => {
-                self.nodes.insert(cursor.node_index + 1, node);
+                let insert_node_index = cursor.node_index + 1;
+                for jump in &mut self.jumps {
+                    if (insert_node_index as isize) <= jump.branch_node_index {
+                        jump.branch_node_index += 1;
+                    }
+                    if insert_node_index <= jump.jump_node_index {
+                        jump.jump_node_index += 1;
+                    }
+                }
+
+                self.nodes.insert(insert_node_index, node);
                 insert_continue_jump = true;
                 insert_split_jump = false;
             },
@@ -109,16 +117,11 @@ impl<N: Eq> RawTree<N> {
         }
 
 
-        let mut jump_offset_one_range = 0..0;
-        let mut jump_offset_two_range = 0..0;
-
         if insert_continue_jump {
             let jump = self.jumps[cursor.parent_jump_index].new_child_continue(cursor.node_index);
             let insert_index = self.jumps[cursor.parent_jump_index..].binary_search(&jump)
                 .unwrap_err() + cursor.parent_jump_index;
             self.jumps.insert(insert_index, jump);
-
-            jump_offset_one_range = insert_index + 1..self.jumps.len();
         }
 
         if insert_split_jump {
@@ -127,24 +130,8 @@ impl<N: Eq> RawTree<N> {
             let insert_index = self.jumps[cursor.parent_jump_index..].binary_search(&jump)
                 .unwrap_err() + cursor.parent_jump_index;
             self.jumps.insert(insert_index, jump);
-
-            match jump_offset_one_range.end < insert_index {
-                true => {
-                    jump_offset_two_range = insert_index + 1..jump_offset_one_range.end;
-                    jump_offset_one_range.end = insert_index;
-                },
-                false => jump_offset_one_range = insert_index + 1..self.jumps.len()
-            };
         }
 
-        for jump in &mut self.jumps[jump_offset_one_range] {
-            jump.branch_node_index += 1;
-            jump.jump_node_index += 1;
-        }
-        for jump in &mut self.jumps[jump_offset_two_range] {
-            jump.branch_node_index += 2;
-            jump.jump_node_index += 2;
-        }
 
         #[cfg(debug)]
         {
@@ -187,7 +174,7 @@ impl Jump {
             next_major_node_dist: 0
         }
     }
-    
+
     fn new_child_jump(&mut self, branch_node_index: usize, jump_node_index: usize) -> Jump {
         self.next_major_node_dist = branch_node_index - self.jump_node_index;
 
