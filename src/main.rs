@@ -76,7 +76,7 @@ impl<'a, N: Eq> CursorMut<'a, N> {
         child.map(move |rc| CursorMut{ tree: self.tree, raw: rc })
     }
 
-    pub fn insert_node(&mut self, node: N) {
+    pub fn insert_node(&mut self, node: N) where N: ::std::fmt::Debug {
         self.tree.insert_node_after(self.raw, node);
     }
 }
