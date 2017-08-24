@@ -159,26 +159,24 @@ impl<N: Eq> RawTree<N> {
         }
 
         // Sanity check to see if the jump list is sorted.
-        debug_assert!(self.jumps.windows(2).all(|x| x[0] <= x[1]));
+        debug_assert!(self.jumps.windows(2).all(|x| x[0] < x[1]));
     }
 
     pub fn prune_node(&mut self, cursor: RawCursor) {
         let node_right_leaf = self.node_right_leaf(cursor);
-        let next_jump_index_opt: Option<usize>;
+        let next_jump_index: usize;
 
         let parent_jump = self.jumps[cursor.parent_jump_index];
         {
-            next_jump_index_opt = match parent_jump.next_major_node {
+            next_jump_index = match parent_jump.next_major_node {
                 MajorNode::Jump => {
                     let next_major_node_index = parent_jump.jump_to_node + parent_jump.next_major_node_dist;
-                    Some(
-                        self.jumps[cursor.parent_jump_index + 1..]
-                            .iter().zip(cursor.parent_jump_index + 1..)
-                            .skip_while(|&(x, _)| x.branch_from_node != next_major_node_index as isize)
-                            .next().unwrap().1
-                    )
+                    self.jumps[cursor.parent_jump_index + 1..]
+                        .iter().zip(cursor.parent_jump_index + 1..)
+                        .skip_while(|&(x, _)| x.branch_from_node != next_major_node_index as isize)
+                        .next().unwrap().1
                 },
-                MajorNode::Leaf => None
+                MajorNode::Leaf => usize::max_value()
             };
 
             let parent_jump_mut = &mut self.jumps[cursor.parent_jump_index];
@@ -190,32 +188,17 @@ impl<N: Eq> RawTree<N> {
         self.nodes.splice(cursor.node_index..node_right_leaf.node_index + 1, None);
 
         let nodes_removed = (node_right_leaf.node_index + 1) - cursor.node_index;
-        if let Some(node_next_jump_index) = next_jump_index_opt {
-            println!("nr {}", nodes_removed);
+        let remove_parent_jump = cursor.node_index == parent_jump.jump_to_node;
 
-            let remove_parent_jump = cursor.node_index == parent_jump.jump_to_node;
-
-            let mut retain_index = 0;
-            self.jumps.retain_mut(|jump| {
-                let retain =
-                    !(remove_parent_jump && retain_index == cursor.parent_jump_index) &&
-                    (
-                        retain_index < node_next_jump_index ||
-                        (node_right_leaf.node_index as isize) < jump.branch_from_node
-                    );
-                if retain {
-                    if (node_right_leaf.node_index as isize) <= jump.branch_from_node {
-                        jump.branch_from_node -= nodes_removed as isize;
-                    }
-                    if node_right_leaf.node_index <= jump.jump_to_node {
-                        jump.jump_to_node -= nodes_removed;
-                    }
-                }
-                retain_index += 1;
-                retain
-            });
-        } else {
-            for jump in &mut self.jumps[..] {
+        let mut retain_index = 0;
+        self.jumps.retain_mut(|jump| {
+            let retain =
+                !(remove_parent_jump && retain_index == cursor.parent_jump_index) &&
+                (
+                    retain_index < next_jump_index ||
+                    (node_right_leaf.node_index as isize) < jump.branch_from_node
+                );
+            if retain {
                 if (node_right_leaf.node_index as isize) <= jump.branch_from_node {
                     jump.branch_from_node -= nodes_removed as isize;
                 }
@@ -223,7 +206,10 @@ impl<N: Eq> RawTree<N> {
                     jump.jump_to_node -= nodes_removed;
                 }
             }
-        }
+            retain_index += 1;
+            retain
+        });
+        debug_assert!(self.jumps.windows(2).all(|x| x[0] < x[1]));
     }
 }
 

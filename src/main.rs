@@ -26,7 +26,7 @@ fn main() {
             {
                 let mut cursor = cursor.enter_node("a").unwrap();
                 cursor.insert_node("furthermore");
-                // cursor.prune();
+                cursor.prune();
             }
         }
     }
