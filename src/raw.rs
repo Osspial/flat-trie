@@ -17,7 +17,6 @@ enum MajorNode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Jump {
     branch_from_node: isize,
-    depth: isize,
     jump_to_node: usize,
     next_major_node: MajorNode,
     /// The distance from the node at `jump_to_node` to to next node that's eithe a leaf or a
@@ -217,7 +216,6 @@ impl Jump {
     fn root() -> Jump {
         Jump {
             branch_from_node: -1,
-            depth: -1,
             jump_to_node: 0,
             next_major_node: MajorNode::Leaf,
             next_major_node_dist: 0
@@ -228,19 +226,16 @@ impl Jump {
         let jump_to_node = branch_from_node + 1;
 
         let branch_from_node = branch_from_node as isize;
-        let child_depth = (jump_to_node - self.jump_to_node) as isize + self.depth;
 
         let jump_next_major_node = self.next_major_node;
         self.next_major_node = MajorNode::Jump;
 
-        assert!(self.depth < child_depth && child_depth <= self.depth + 1 + self.next_major_node_dist as isize);
         assert!(self.jump_to_node < jump_to_node && jump_to_node <= self.jump_to_node + 1 + self.next_major_node_dist);
 
         self.next_major_node_dist = branch_from_node as usize - self.jump_to_node;
 
         Jump {
             branch_from_node,
-            depth: child_depth,
             jump_to_node,
             next_major_node: jump_next_major_node,
             next_major_node_dist: 0
@@ -249,18 +244,15 @@ impl Jump {
 
     fn new_child_jump(&mut self, branch_from_node: usize, jump_to_node: usize) -> Jump {
         let branch_from_node = branch_from_node as isize;
-        let child_depth = branch_from_node - self.jump_to_node as isize + 1 + self.depth;
 
         self.next_major_node = MajorNode::Jump;
 
-        assert!(self.depth < child_depth && child_depth <= self.depth + 1 + self.next_major_node_dist as isize);
         assert!(self.next_major_node_dist + self.jump_to_node < jump_to_node);
 
         self.next_major_node_dist = branch_from_node as usize - self.jump_to_node;
 
         Jump {
             branch_from_node,
-            depth: child_depth,
             jump_to_node,
             next_major_node: MajorNode::Leaf,
             next_major_node_dist: 0
