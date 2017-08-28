@@ -197,7 +197,7 @@ impl<N: Eq, L> RawTree<N, L> {
         }
     }
 
-    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N, leaf_opt: Option<L>) {
+    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N, leaf_opt: Option<L>) -> RawCursor {
         let mut num_children = 0;
         for child_cursor in self.node_direct_children(cursor) {
             num_children += 1;
@@ -311,6 +311,7 @@ impl<N: Eq, L> RawTree<N, L> {
         }
         self.nodes.insert(insert_node_index, node);
 
+        // Insert the jumps into the jump vec
         if insert_continue_jump {
             self.jumps.insert(insert_continue_jump_index, continue_jump.unwrap());
         }
@@ -332,6 +333,7 @@ impl<N: Eq, L> RawTree<N, L> {
             }
         }
 
+        // Update the parent jump's next major node
         {
             let parent_jump_mut = &mut self.jumps[cursor.parent_jump_index];
 
@@ -349,6 +351,15 @@ impl<N: Eq, L> RawTree<N, L> {
 
         // Sanity check to see if the jump list is sorted.
         debug_assert!(self.jumps.windows(2).all(|x| x[0] < x[1]));
+
+        RawCursor {
+            node_index: insert_node_index as isize,
+            parent_jump_index: match self.jumps[cursor.parent_jump_index].next_major_node {
+                MajorNode::Leaf{..} => cursor.parent_jump_index,
+                MajorNode::Jump{..} if insert_split_jump => insert_split_jump_index,
+                MajorNode::Jump{child_jump_index} => child_jump_index
+            }
+        }
     }
 
     pub fn prune_node(&mut self, cursor: RawCursor) {

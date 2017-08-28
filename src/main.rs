@@ -20,8 +20,13 @@ fn main() {
         }
         {
             let mut cursor = cursor.enter_node("a").unwrap();
-            cursor.insert_node("a.0", Some(32));
-            cursor.prune();
+            let mut cursor = cursor.insert_node("a.0", Some(32));
+            cursor.insert_node("a.0.d", None);
+            cursor.insert_node("a.0.a", None);
+        }
+        {
+            let mut cursor = cursor.insert_node("e", None);
+            cursor.insert_node("e.q", None);
         }
     //     cursor.insert_node("a");
     //     cursor.insert_node("b");
@@ -60,13 +65,11 @@ fn main() {
 #[derive(Debug)]
 pub struct LongTree<N: Eq, L>(RawTree<N, L>);
 
-#[must_use]
 pub struct Cursor<'a, N: 'a + Eq, L: 'a> {
     tree: &'a RawTree<N, L>,
     raw: RawCursor
 }
 
-#[must_use]
 pub struct CursorMut<'a, N: 'a + Eq, L: 'a> {
     tree: &'a mut RawTree<N, L>,
     raw: RawCursor
@@ -106,8 +109,12 @@ impl<'a, N: Eq, L> CursorMut<'a, N, L> {
         self.tree.node_leaf(self.raw)
     }
 
-    pub fn insert_node(&mut self, node: N, leaf: Option<L>) {
-        self.tree.insert_node_after(self.raw, node, leaf);
+    pub fn insert_node(&mut self, node: N, leaf: Option<L>) -> CursorMut<N, L> {
+        let raw = self.tree.insert_node_after(self.raw, node, leaf);
+        CursorMut {
+            tree: self.tree,
+            raw
+        }
     }
 
     pub fn prune(self) {
