@@ -2,15 +2,18 @@ use std::cmp::Eq;
 use odds::vec::VecExt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawTree<N: Eq> {
+pub struct RawTree<N: Eq, L> {
     pub nodes: Vec<N>,
     /// The jumptions in the tree
     jumps: Vec<Jump>,
+    leaves: Vec<L>
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum MajorNode {
-    Leaf,
+    Leaf {
+        leaf_index: isize
+    },
     Jump {
         child_jump_index: usize
     }
@@ -32,11 +35,96 @@ pub struct RawCursor {
     parent_jump_index: usize
 }
 
-impl<N: Eq> RawTree<N> {
-    pub fn new() -> RawTree<N> {
+impl RawTree<&'static str, i32> {
+    pub fn example() -> Self {
+        RawTree {
+            nodes: vec![
+                "a",
+                "a.a",
+                "a.a.a",
+                "a.b",
+                "a.c",
+                "b",
+                "c",
+                "d"
+            ],
+            jumps: vec![
+                Jump {
+                    parent_jump_index: -1,
+                    jump_to_node: -1,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Jump {
+                        child_jump_index: 1
+                    }
+                },
+                Jump {
+                    parent_jump_index: 0,
+                    jump_to_node: 0,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Jump {
+                        child_jump_index: 5
+                    }
+                },
+                Jump {
+                    parent_jump_index: 0,
+                    jump_to_node: 5,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Leaf {
+                        leaf_index: -1
+                    }
+                },
+                Jump {
+                    parent_jump_index: 0,
+                    jump_to_node: 6,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Leaf {
+                        leaf_index: -1
+                    }
+                },
+                Jump {
+                    parent_jump_index: 0,
+                    jump_to_node: 7,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Leaf {
+                        leaf_index: -1
+                    }
+                },
+                Jump {
+                    parent_jump_index: 1,
+                    jump_to_node: 1,
+                    next_major_node_dist: 1,
+                    next_major_node: MajorNode::Leaf {
+                        leaf_index: 0
+                    }
+                },
+                Jump {
+                    parent_jump_index: 1,
+                    jump_to_node: 3,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Leaf {
+                        leaf_index: -1
+                    }
+                },
+                Jump {
+                    parent_jump_index: 1,
+                    jump_to_node: 4,
+                    next_major_node_dist: 0,
+                    next_major_node: MajorNode::Leaf {
+                        leaf_index: -1
+                    }
+                }
+            ],
+            leaves: vec![23]
+        }
+    }
+}
+
+impl<N: Eq, L> RawTree<N, L> {
+    pub fn new() -> RawTree<N, L> {
         RawTree {
             nodes: vec![],
-            jumps: vec![Jump::default_root()]
+            jumps: vec![Jump::default_root()],
+            leaves: vec![]
         }
     }
 
@@ -58,7 +146,7 @@ impl<N: Eq> RawTree<N> {
                 }).into_iter().filter(|_| parent_jump.cursor_has_children(cursor)).next();
                 child_jump_search = self.jumps.len()..;
             }
-            (MajorNode::Leaf, true) => {
+            (MajorNode::Leaf{..}, true) => {
                 direct_child = None;
                 child_jump_search = self.jumps.len()..;
             }
@@ -79,7 +167,7 @@ impl<N: Eq> RawTree<N> {
         direct_child.into_iter().chain(jump_child_iter)
     }
 
-    pub fn node_last_leaf(&self, cursor: RawCursor) -> RawCursor {
+    pub fn last_child_node(&self, cursor: RawCursor) -> RawCursor {
         let mut jump_index = cursor.parent_jump_index;
         let mut jump = self.jumps[jump_index];
 
@@ -97,7 +185,19 @@ impl<N: Eq> RawTree<N> {
         }
     }
 
-    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N) {
+    pub fn node_leaf(&self, cursor: RawCursor) -> Option<&L> {
+        let parent_jump = self.jumps[cursor.parent_jump_index];
+        match parent_jump.next_major_node_dist == (cursor.node_index - parent_jump.jump_to_node) as usize {
+            true => match parent_jump.next_major_node {
+                MajorNode::Leaf{ leaf_index: -1 } |
+                MajorNode::Jump{..} => None,
+                MajorNode::Leaf{ leaf_index } => Some(&self.leaves[leaf_index as usize])
+            }
+            false => None
+        }
+    }
+
+    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N, leaf_opt: Option<L>) {
         let mut num_children = 0;
         for child_cursor in self.node_direct_children(cursor) {
             num_children += 1;
@@ -121,12 +221,12 @@ impl<N: Eq> RawTree<N> {
                 insert_split_jump = false;
             },
             1 => {
-                insert_node_index = (self.node_last_leaf(cursor).node_index + 1) as usize;
+                insert_node_index = (self.last_child_node(cursor).node_index + 1) as usize;
                 insert_continue_jump = !cursor_parent_jump.cursor_at_next_major_node(cursor);
                 insert_split_jump = true;
             },
             _ => {
-                insert_node_index = (self.node_last_leaf(cursor).node_index + 1) as usize;
+                insert_node_index = (self.last_child_node(cursor).node_index + 1) as usize;
                 insert_continue_jump = false;
                 insert_split_jump = true;
             }
@@ -134,6 +234,7 @@ impl<N: Eq> RawTree<N> {
 
         let (mut continue_jump, mut split_jump) = (None, None);
         let (insert_continue_jump_index, insert_split_jump_index): (usize, usize);
+        let leaf_jump_index: usize;
 
         match insert_continue_jump {
             false => insert_continue_jump_index = usize::max_value(),
@@ -151,13 +252,16 @@ impl<N: Eq> RawTree<N> {
             }
         }
         match insert_split_jump {
-            false => insert_split_jump_index = usize::max_value(),
+            false => {
+                insert_split_jump_index = usize::max_value();
+                leaf_jump_index = cursor.parent_jump_index;
+            },
             true => {
                 let jump = Jump {
                     parent_jump_index: cursor.parent_jump_index as isize,
                     jump_to_node: insert_node_index as isize,
                     next_major_node_dist: 0,
-                    next_major_node: MajorNode::Leaf
+                    next_major_node: MajorNode::Leaf{ leaf_index: -1 }
                 };
                 split_jump = Some(jump);
 
@@ -170,10 +274,12 @@ impl<N: Eq> RawTree<N> {
                         // split jump actually needs to be inserted to maintain sorted order. This
                         // next line corrects for that.
                         insert_continue_jump as usize;
+                leaf_jump_index = insert_split_jump_index;
             }
         }
 
-        for jump in &mut self.jumps[..] {
+        let mut leaf_insert_index = 0;
+        for (jump_index, jump) in self.jumps[..].iter_mut().enumerate() {
             match jump.next_major_node {
                 MajorNode::Jump{ref mut child_jump_index} => {
                     if insert_continue_jump_index <= *child_jump_index {
@@ -183,6 +289,12 @@ impl<N: Eq> RawTree<N> {
                         *child_jump_index += 1;
                     }
                 },
+                MajorNode::Leaf{ref mut leaf_index} if *leaf_index != -1 => {
+                    match jump_index < leaf_jump_index {
+                        true => leaf_insert_index = *leaf_index + 1,
+                        false => *leaf_index += leaf_opt.is_some() as isize
+                    }
+                }
                 _ => ()
             }
 
@@ -207,6 +319,19 @@ impl<N: Eq> RawTree<N> {
             self.jumps.insert(insert_split_jump_index, split_jump.unwrap());
         }
 
+        if let Some(leaf) = leaf_opt {
+            match self.jumps[leaf_jump_index].next_major_node {
+                MajorNode::Leaf{ref mut leaf_index} => {
+                    if *leaf_index != -1 {
+                        self.leaves.remove(*leaf_index as usize);
+                    }
+                    *leaf_index = leaf_insert_index;
+                    self.leaves.insert(*leaf_index as usize, leaf);
+                },
+                MajorNode::Jump{..} => panic!("Unexpected next jump")
+            }
+        }
+
         {
             let parent_jump_mut = &mut self.jumps[cursor.parent_jump_index];
 
@@ -215,7 +340,7 @@ impl<N: Eq> RawTree<N> {
                 parent_jump_mut.next_major_node = MajorNode::Jump {
                     child_jump_index: match parent_jump_mut.next_major_node {
                         MajorNode::Jump{child_jump_index} => child_jump_index,
-                        MajorNode::Leaf => insert_continue_jump_index
+                        MajorNode::Leaf{..} => insert_continue_jump_index
                     }
                 };
             }
@@ -231,26 +356,27 @@ impl<N: Eq> RawTree<N> {
             self.nodes.clear();
             self.jumps.clear();
             self.jumps.extend(Some(Jump::default_root()));
+            self.leaves.clear();
         } else {
-            let node_last_leaf = self.node_last_leaf(cursor);
+            let last_child_node = self.last_child_node(cursor);
             let first_child_jump_index: usize;
 
             let parent_jump = self.jumps[cursor.parent_jump_index];
             first_child_jump_index = match parent_jump.next_major_node {
                 MajorNode::Jump{child_jump_index} => child_jump_index,
-                MajorNode::Leaf => usize::max_value()
+                MajorNode::Leaf{..} => usize::max_value()
             };
 
             {
                 let parent_jump_mut = &mut self.jumps[cursor.parent_jump_index];
-                parent_jump_mut.next_major_node = MajorNode::Leaf;
+                parent_jump_mut.next_major_node = MajorNode::Leaf{ leaf_index: -1 };
                 parent_jump_mut.next_major_node_dist = (cursor.node_index - parent_jump.jump_to_node) as usize;
             }
 
 
-            self.nodes.splice(cursor.node_index as usize..node_last_leaf.node_index as usize + 1, None);
+            self.nodes.splice(cursor.node_index as usize..last_child_node.node_index as usize + 1, None);
 
-            let nodes_removed = (node_last_leaf.node_index + 1) - cursor.node_index;
+            let nodes_removed = (last_child_node.node_index + 1) - cursor.node_index;
             let remove_parent_jump_index = match cursor.node_index == parent_jump.jump_to_node {
                 true => cursor.parent_jump_index,
                 false => usize::max_value()
@@ -258,31 +384,48 @@ impl<N: Eq> RawTree<N> {
 
             let mut retain_index = 0;
             let mut child_jump_count = 0;
+            let mut leaf_remove_range = 0usize..0;
             self.jumps.retain_mut(|jump| {
                 let in_child_jump_range =
                     first_child_jump_index <= retain_index &&
-                    jump.jump_to_node <= node_last_leaf.node_index;
+                    jump.jump_to_node <= last_child_node.node_index;
                 let retain = !(
                     in_child_jump_range ||
                     retain_index == cursor.parent_jump_index && cursor.node_index == parent_jump.jump_to_node
                 );
 
-                if node_last_leaf.node_index <= jump.jump_to_node {
+                if last_child_node.node_index <= jump.jump_to_node {
                     jump.jump_to_node -= nodes_removed;
                 }
 
                 {
                     let jump_offset = |jump_index: isize| {
                         ((remove_parent_jump_index as isize) < jump_index) as usize +
-                        match first_child_jump_index <= retain_index && node_last_leaf.node_index < jump_index {
+                        match first_child_jump_index <= retain_index && last_child_node.node_index < jump_index {
                             false => 0,
                             true => child_jump_count
                         }
                     };
 
                     jump.parent_jump_index -= jump_offset(jump.parent_jump_index) as isize;
-                    if let MajorNode::Jump{ref mut child_jump_index} = jump.next_major_node {
-                        *child_jump_index -= jump_offset(*child_jump_index as isize);
+                    match jump.next_major_node {
+                        MajorNode::Jump{ref mut child_jump_index} => {
+                            *child_jump_index -= jump_offset(*child_jump_index as isize);
+                        }
+                        MajorNode::Leaf{ref mut leaf_index} if *leaf_index != -1 => {
+                            if retain_index < first_child_jump_index {
+                                // This branch is before the child jump range
+                                leaf_remove_range.start = (*leaf_index + 1) as usize;
+                                leaf_remove_range.end = leaf_remove_range.start;
+                            } else if jump.jump_to_node <= last_child_node.node_index {
+                                // This branch is during the child jump range
+                                leaf_remove_range.end = (*leaf_index + 1) as usize;
+                            } else {
+                                // This branch is after the child jump range
+                                *leaf_index -= leaf_remove_range.len() as isize;
+                            }
+                        },
+                        _ => ()
                     }
                 }
 
@@ -293,6 +436,7 @@ impl<N: Eq> RawTree<N> {
 
                 retain
             });
+            self.leaves.splice(leaf_remove_range, None);
             debug_assert!(self.jumps.windows(2).all(|x| x[0] < x[1]));
         }
     }
@@ -305,7 +449,7 @@ impl Jump {
             parent_jump_index: -1,
             jump_to_node: -1,
             next_major_node_dist: 0,
-            next_major_node: MajorNode::Leaf
+            next_major_node: MajorNode::Leaf{ leaf_index: -1 }
         }
     }
     #[inline]
@@ -335,7 +479,7 @@ impl MajorNode {
     fn is_jump(self) -> bool {
         match self {
             MajorNode::Jump{..} => true,
-            MajorNode::Leaf     => false
+            MajorNode::Leaf{..} => false
         }
     }
 }
