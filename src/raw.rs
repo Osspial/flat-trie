@@ -1,9 +1,11 @@
 use std::cmp::Eq;
+use std::borrow::Borrow;
+use std::ops::Range;
 use odds::vec::VecExt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawTree<N: Eq, L> {
-    pub nodes: Vec<N>,
+    nodes: Vec<N>,
     /// The jumptions in the tree
     jumps: Vec<Jump>,
     leaves: Vec<L>
@@ -195,6 +197,44 @@ impl<N: Eq, L> RawTree<N, L> {
             }
             false => None
         }
+    }
+
+    fn find_leaf<M, I>(&self, leaf: &M, ranges: I) -> Option<RawCursor>
+        where M: Eq,
+              L: Borrow<M>,
+              I: IntoIterator<Item=Range<usize>>
+    {
+        let mut leaf_jump_index_opt = None;
+        for (jump, jump_index) in ranges.into_iter().flat_map(|r| self.jumps[r.clone()].iter().zip(r)) {
+            match jump.next_major_node {
+                MajorNode::Leaf{leaf_index} if leaf_index != -1 => {
+                    if self.leaves[leaf_index as usize].borrow() == leaf {
+                        leaf_jump_index_opt = Some(jump_index);
+                        break;
+                    }
+                },
+                _ => ()
+            }
+        }
+
+        leaf_jump_index_opt.map(|jump_index| {
+            let jump = self.jumps[jump_index];
+            RawCursor {
+                node_index: jump.jump_to_node + jump.next_major_node_dist as isize,
+                parent_jump_index: jump_index
+            }
+        })
+    }
+
+    pub fn find_leaf_after_wrapping<M>(&self, cursor: RawCursor, leaf: &M) -> Option<RawCursor>
+        where M: Eq,
+              L: Borrow<M>
+    {
+        if self.leaves.len() == 0 {
+            return None;
+        }
+
+        self.find_leaf(leaf, [cursor.parent_jump_index + 1..self.jumps.len(), 0..cursor.parent_jump_index + 1].iter().cloned())
     }
 
     pub fn insert_node_after(&mut self, cursor: RawCursor, node: N, leaf_opt: Option<L>) -> RawCursor {

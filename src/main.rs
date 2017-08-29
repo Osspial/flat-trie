@@ -4,6 +4,7 @@ mod raw;
 
 use raw::*;
 
+use std::borrow::Borrow;
 // use std::fmt::{self, Debug, Formatter};
 
 fn main() {
@@ -95,7 +96,37 @@ impl<N: Eq, L> LongTree<N, L> {
     }
 }
 
+impl<'a, N: Eq, L> Cursor<'a, N, L> {
+    pub fn node(&self) -> &N {
+        self.tree.get_node(self.raw).unwrap()
+    }
+
+    pub fn direct_children<'b>(&'b self) -> impl 'b + Iterator<Item=&'b N> {
+        self.tree.node_direct_children(self.raw).map(move |rc| self.tree.get_node(rc).unwrap())
+    }
+
+    pub fn enter_node(&self, node: N) -> Option<Cursor<N, L>> {
+        let child = self.tree.node_direct_children(self.raw).find(|rc| &node == self.tree.get_node(*rc).unwrap());
+        child.map(move |rc| Cursor{ tree: self.tree, raw: rc })
+    }
+
+    pub fn get_leaf(&self) -> Option<&L> {
+        self.tree.node_leaf(self.raw)
+    }
+
+    pub fn find_leaf_after_wrapping<M>(&self, leaf: &M) -> Option<Cursor<N, L>>
+        where M: Eq,
+              L: Borrow<M>
+    {
+        self.tree.find_leaf_after_wrapping(self.raw, leaf).map(|raw| Cursor{ tree: self.tree, raw })
+    }
+}
+
 impl<'a, N: Eq, L> CursorMut<'a, N, L> {
+    pub fn node(&self) -> &N {
+        self.tree.get_node(self.raw).unwrap()
+    }
+
     pub fn direct_children<'b>(&'b self) -> impl 'b + Iterator<Item=&'b N> {
         self.tree.node_direct_children(self.raw).map(move |rc| self.tree.get_node(rc).unwrap())
     }
@@ -119,21 +150,6 @@ impl<'a, N: Eq, L> CursorMut<'a, N, L> {
 
     pub fn prune(self) {
         self.tree.prune_node(self.raw);
-    }
-}
-
-impl<'a, N: Eq, L> Cursor<'a, N, L> {
-    pub fn direct_children<'b>(&'b self) -> impl 'b + Iterator<Item=&'b N> {
-        self.tree.node_direct_children(self.raw).map(move |rc| self.tree.get_node(rc).unwrap())
-    }
-
-    pub fn enter_node(&self, node: N) -> Option<Cursor<N, L>> {
-        let child = self.tree.node_direct_children(self.raw).find(|rc| &node == self.tree.get_node(*rc).unwrap());
-        child.map(move |rc| Cursor{ tree: self.tree, raw: rc })
-    }
-
-    pub fn get_leaf(&self) -> Option<&L> {
-        self.tree.node_leaf(self.raw)
     }
 }
 
