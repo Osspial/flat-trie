@@ -37,90 +37,6 @@ pub struct RawCursor {
     parent_jump_index: usize
 }
 
-impl RawTree<&'static str, i32> {
-    pub fn example() -> Self {
-        RawTree {
-            nodes: vec![
-                "a",
-                "a.a",
-                "a.a.a",
-                "a.b",
-                "a.c",
-                "b",
-                "c",
-                "d"
-            ],
-            jumps: vec![
-                Jump {
-                    parent_jump_index: -1,
-                    jump_to_node: -1,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Jump {
-                        child_jump_index: 1
-                    }
-                },
-                Jump {
-                    parent_jump_index: 0,
-                    jump_to_node: 0,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Jump {
-                        child_jump_index: 5
-                    }
-                },
-                Jump {
-                    parent_jump_index: 0,
-                    jump_to_node: 5,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Leaf {
-                        leaf_index: -1
-                    }
-                },
-                Jump {
-                    parent_jump_index: 0,
-                    jump_to_node: 6,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Leaf {
-                        leaf_index: -1
-                    }
-                },
-                Jump {
-                    parent_jump_index: 0,
-                    jump_to_node: 7,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Leaf {
-                        leaf_index: -1
-                    }
-                },
-                Jump {
-                    parent_jump_index: 1,
-                    jump_to_node: 1,
-                    next_major_node_dist: 1,
-                    next_major_node: MajorNode::Leaf {
-                        leaf_index: 0
-                    }
-                },
-                Jump {
-                    parent_jump_index: 1,
-                    jump_to_node: 3,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Leaf {
-                        leaf_index: -1
-                    }
-                },
-                Jump {
-                    parent_jump_index: 1,
-                    jump_to_node: 4,
-                    next_major_node_dist: 0,
-                    next_major_node: MajorNode::Leaf {
-                        leaf_index: -1
-                    }
-                }
-            ],
-            leaves: vec![23]
-        }
-    }
-}
-
 impl<N: Eq, L> RawTree<N, L> {
     pub fn new() -> RawTree<N, L> {
         RawTree {
@@ -132,6 +48,23 @@ impl<N: Eq, L> RawTree<N, L> {
 
     pub fn get_node(&self, cursor: RawCursor) -> Option<&N> {
         self.nodes.get(cursor.node_index as usize)
+    }
+
+    pub fn node_parent(&self, cursor: RawCursor) -> Option<RawCursor> {
+        let parent_jump = self.jumps[cursor.parent_jump_index];
+        match cursor.node_index == parent_jump.jump_to_node {
+            true => {
+                self.jumps.get(parent_jump.parent_jump_index as usize)
+                    .map(|j| RawCursor {
+                        node_index: j.jump_to_node + j.next_major_node_dist as isize,
+                        parent_jump_index: parent_jump.parent_jump_index as usize
+                    })
+            }
+            false => Some(RawCursor {
+                node_index: cursor.node_index - 1,
+                ..cursor
+            })
+        }
     }
 
     pub fn node_direct_children<'a>(&'a self, cursor: RawCursor) -> impl 'a + Iterator<Item=RawCursor> {
