@@ -1,6 +1,7 @@
 use std::cmp::Eq;
 use std::borrow::Borrow;
 use std::ops::Range;
+use std::iter::ExactSizeIterator;
 use odds::vec::VecExt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +10,12 @@ pub struct RawTree<N: Eq, L> {
     /// The jumptions in the tree
     jumps: Vec<Jump>,
     leaves: Vec<L>
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawCursor {
+    node_index: isize,
+    parent_jump_index: usize
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,12 +36,6 @@ struct Jump {
     /// split
     next_major_node_dist: usize,
     next_major_node: MajorNode
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RawCursor {
-    node_index: isize,
-    parent_jump_index: usize
 }
 
 impl<N: Eq, L> RawTree<N, L> {
@@ -102,6 +103,23 @@ impl<N: Eq, L> RawTree<N, L> {
         direct_child.into_iter().chain(jump_child_iter)
     }
 
+    pub fn get_sibling(&self, cursor: RawCursor, dist: isize) -> Option<RawCursor> {
+        let parent_jump = self.jumps[cursor.parent_jump_index];
+        if parent_jump.jump_to_node == cursor.node_index {
+            let sibling_jump_index = (cursor.parent_jump_index as isize + dist) as usize;
+            match self.jumps.get(sibling_jump_index) {
+                Some(potential_sibling_jump) if potential_sibling_jump.parent_jump_index == parent_jump.parent_jump_index =>
+                    Some(RawCursor {
+                        node_index: potential_sibling_jump.jump_to_node,
+                        parent_jump_index: sibling_jump_index
+                    }),
+                _ => None
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn last_child_node(&self, cursor: RawCursor) -> RawCursor {
         let mut jump_index = cursor.parent_jump_index;
         let mut jump = self.jumps[jump_index];
@@ -133,7 +151,7 @@ impl<N: Eq, L> RawTree<N, L> {
     }
 
     fn find_leaf<M, I>(&self, leaf: &M, ranges: I) -> Option<RawCursor>
-        where M: Eq,
+        where M: Eq + ?Sized,
               L: Borrow<M>,
               I: IntoIterator<Item=Range<usize>>
     {
@@ -160,7 +178,7 @@ impl<N: Eq, L> RawTree<N, L> {
     }
 
     pub fn find_leaf_after_wrapping<M>(&self, cursor: RawCursor, leaf: &M) -> Option<RawCursor>
-        where M: Eq,
+        where M: Eq + ?Sized,
               L: Borrow<M>
     {
         if self.leaves.len() == 0 {
@@ -170,11 +188,21 @@ impl<N: Eq, L> RawTree<N, L> {
         self.find_leaf(leaf, [cursor.parent_jump_index + 1..self.jumps.len(), 0..cursor.parent_jump_index + 1].iter().cloned())
     }
 
-    pub fn insert_node_after(&mut self, cursor: RawCursor, node: N, leaf_opt: Option<L>) -> RawCursor {
+    pub fn insert_nodes_after<I>(&mut self, cursor: RawCursor, nodes: I, leaf_opt: Option<L>) -> RawCursor
+        where I: IntoIterator<Item=N>,
+              I::IntoIter: ExactSizeIterator
+    {
+        let mut nodes = nodes.into_iter();
+        if nodes.len() == 0 {
+            return cursor;
+        }
+
         let mut num_children = 0;
+        let num_nodes_insert = nodes.len();
+        let first_node = nodes.next().unwrap();
         for child_cursor in self.node_direct_children(cursor) {
             num_children += 1;
-            if self.nodes[child_cursor.node_index as usize] == node {
+            if self.nodes[child_cursor.node_index as usize] == first_node {
                 panic!("Attempt to insert node when node already exists");
             }
         }
@@ -188,7 +216,7 @@ impl<N: Eq, L> RawTree<N, L> {
             0 => {
                 insert_node_index = (cursor.node_index + 1) as usize;
                 if let Some(jump) = self.jumps.get_mut(cursor.parent_jump_index) {
-                    jump.next_major_node_dist += 1;
+                    jump.next_major_node_dist += num_nodes_insert;
                 }
                 insert_continue_jump = false;
                 insert_split_jump = false;
@@ -271,18 +299,18 @@ impl<N: Eq, L> RawTree<N, L> {
                 _ => ()
             }
 
-            if insert_continue_jump_index < jump.parent_jump_index as usize && jump.parent_jump_index != -1 {
+            if insert_continue_jump_index <= jump.parent_jump_index as usize && jump.parent_jump_index != -1 {
                 jump.parent_jump_index += 1;
             }
-            if insert_split_jump_index < jump.parent_jump_index as usize && jump.parent_jump_index != -1 {
+            if insert_split_jump_index <= jump.parent_jump_index as usize && jump.parent_jump_index != -1 {
                 jump.parent_jump_index += 1;
             }
 
             if insert_node_index <= jump.jump_to_node as usize && jump.jump_to_node != -1 {
-                jump.jump_to_node += 1;
+                jump.jump_to_node += num_nodes_insert as isize;
             }
         }
-        self.nodes.insert(insert_node_index, node);
+        self.nodes.splice(insert_node_index..insert_node_index, Some(first_node).into_iter().chain(nodes));
 
         // Insert the jumps into the jump vec
         if insert_continue_jump {
@@ -324,6 +352,12 @@ impl<N: Eq, L> RawTree<N, L> {
 
         // Sanity check to see if the jump list is sorted.
         debug_assert!(self.jumps.windows(2).all(|x| x[0] < x[1]));
+        for (i, jump) in self.jumps.iter().enumerate() {
+            match jump.next_major_node {
+                MajorNode::Jump{child_jump_index} => assert_eq!(i, self.jumps[child_jump_index].parent_jump_index as usize),
+                _ => ()
+            }
+        }
 
         RawCursor {
             node_index: insert_node_index as isize,
