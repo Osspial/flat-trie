@@ -4,7 +4,7 @@ mod raw;
 
 use raw::*;
 
-use std::iter::ExactSizeIterator;
+use std::iter::{self, ExactSizeIterator};
 use std::borrow::Borrow;
 
 fn main() {
@@ -49,6 +49,12 @@ fn main() {
         }
         println!("{:?}", cursor.node());
     }
+
+    let mut cursor = *tree.cursor().enter_child("a").unwrap().enter_child("a.a").unwrap();
+    let mut cursor_clone = cursor.clone();
+    for m in cursor.move_to_cursor(*cursor_clone.find_leaf_after_wrapping(&16).unwrap()) {
+        println!("{:?}", m);
+    }
 }
 
 #[derive(Debug)]
@@ -63,6 +69,12 @@ pub struct Cursor<'a, N: 'a + Eq, L: 'a> {
 pub struct CursorMut<'a, N: 'a + Eq, L: 'a> {
     tree: &'a mut RawTree<N, L>,
     raw: RawCursor
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CursorMove<'a, N: 'a> {
+    Child(&'a N),
+    Parent
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +129,15 @@ macro_rules! impl_cursor_common {
             pub fn enter_sibling(&mut self, sibling_dist: isize) -> Result<&mut Self, FindError> {
                 self.raw = self.tree.get_sibling(self.raw, sibling_dist).ok_or(FindError::NodeNotFound)?;
                 Ok(self)
+            }
+
+            pub fn move_to_cursor<'b>(&'b mut self, cursor: Cursor<N, L>) -> impl 'b + Iterator<Item=CursorMove<'b, N>> {
+                let old_raw = self.raw;
+                self.raw = cursor.raw;
+                let (ancestor, elevate_dist) = self.tree.common_ancestor(old_raw, cursor.raw);
+                iter::repeat(()).map(|_| CursorMove::Parent).take(elevate_dist)
+                    .chain(self.tree.route_to_descendant(ancestor, cursor.raw)
+                    .map(|n| CursorMove::Child(n)))
             }
 
             pub fn enter_child<O>(&mut self, node: &O) -> Result<&mut Self, FindError>

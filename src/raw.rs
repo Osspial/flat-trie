@@ -150,6 +150,104 @@ impl<N: Eq, L> RawTree<N, L> {
         }
     }
 
+    pub fn node_enter_children<'b, I, O>(&self, mut cursor: RawCursor, children: I) -> Result<RawCursor, (RawCursor, usize)>
+        where I: IntoIterator<Item=&'b O>,
+              I::IntoIter: ExactSizeIterator,
+              N: Borrow<O>,
+              O: 'b + Eq + ?Sized
+    {
+
+        for (i, child) in children.into_iter().enumerate() {
+            let parent_jump = self.jumps[cursor.parent_jump_index];
+
+            if parent_jump.cursor_at_next_major_node(cursor) {
+                let cursor_opt: Option<RawCursor>;
+                match parent_jump.next_major_node {
+                    MajorNode::Leaf{..} => return Err((cursor, i)),
+                    MajorNode::Jump{..} => cursor_opt =
+                        self.node_direct_children(cursor)
+                            .map(|cursor| (&self.nodes[cursor.node_index as usize], cursor))
+                            .find(|&(node, _)| child == node.borrow()).map(|(_, cursor)| cursor)
+                }
+                match cursor_opt {
+                    Some(nc) => cursor = nc,
+                    None => return Err((cursor, i))
+                }
+            } else if child == self.nodes[(cursor.node_index + 1) as usize].borrow() {
+                cursor.node_index += 1;
+            } else {
+                return Err((cursor, i))
+            }
+        }
+
+        Ok(cursor)
+    }
+
+    pub fn common_ancestor(&self, left: RawCursor, right: RawCursor) -> (RawCursor, usize) {
+        let mut left_parent_index = left.parent_jump_index as isize;
+        let mut right_parent_index = right.parent_jump_index as isize;
+
+        let mut dist_from_left = (left.node_index - self.jumps[left_parent_index as usize].jump_to_node) as usize;
+
+        while left_parent_index != right_parent_index {
+            while left_parent_index < right_parent_index {
+                right_parent_index = self.jumps[right_parent_index as usize].parent_jump_index;
+            }
+            while right_parent_index < left_parent_index {
+                left_parent_index = self.jumps[left_parent_index as usize].parent_jump_index;
+                dist_from_left += 1 + self.jumps[left_parent_index as usize].next_major_node_dist;
+            }
+        }
+
+        match self.jumps.get(left_parent_index as usize) {
+            Some(common_parent) => (RawCursor {
+                node_index: common_parent.jump_to_node + common_parent.next_major_node_dist as isize,
+                parent_jump_index: left_parent_index as usize
+            }, dist_from_left - common_parent.next_major_node_dist),
+            None => (RawCursor::root(), dist_from_left)
+        }
+    }
+
+    pub fn route_to_descendant<'a>(&'a self, node: RawCursor, descendant: RawCursor) -> impl 'a + Iterator<Item=&'a N> {
+        use std::{cmp, iter};
+
+        let mut parent_jump_index = node.parent_jump_index;
+        let mut parent_jump = self.jumps[parent_jump_index];
+
+        let node_range_end = move |jump: Jump| (1 + cmp::min(descendant.node_index, (jump.jump_to_node + jump.next_major_node_dist as isize))) as usize;
+
+        self.nodes[(node.node_index + 1) as usize..node_range_end(parent_jump)].iter().chain(
+            // This iterator is what happens when an iterator equivalent of a `while` loop doesn't exist.
+            iter::repeat(()).scan((), move |_, _| {
+                match parent_jump_index < descendant.parent_jump_index && parent_jump.next_major_node.is_jump() {
+                    true => {
+                        let child_jump_index = match parent_jump.next_major_node {
+                            MajorNode::Jump{child_jump_index} => child_jump_index,
+                            _ => unreachable!()
+                        };
+
+                        parent_jump_index = self.jumps[child_jump_index..].iter()
+                            .take_while(|j| j.parent_jump_index == parent_jump_index as isize)
+                            .take_while(|j| j.jump_to_node <= descendant.node_index)
+                            .zip(child_jump_index..)
+                            .last().expect("`descendant` is not a descendant of `node`").1;
+                        parent_jump = self.jumps[parent_jump_index];
+                        Some(self.nodes[parent_jump.jump_to_node as usize..node_range_end(parent_jump)].iter())
+                    },
+                    false => {
+                        let node_in_jump_range =
+                            parent_jump.jump_to_node <= descendant.node_index &&
+                            descendant.node_index <= parent_jump.jump_to_node + parent_jump.next_major_node_dist as isize;
+                        if !node_in_jump_range {
+                            panic!("`descendant` is not a descendant of `node`")
+                        }
+                        None
+                    }
+                }
+            }).flat_map(|nodes| nodes).fuse()
+        )
+    }
+
     fn find_leaf<M, I>(&self, leaf: &M, ranges: I) -> Option<RawCursor>
         where M: Eq + ?Sized,
               L: Borrow<M>,
