@@ -15,7 +15,8 @@ pub struct RawTree<N: Eq, L> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawCursor {
     node_index: isize,
-    parent_jump_index: usize
+    parent_jump_index: usize,
+    depth: isize
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,7 +36,8 @@ struct Jump {
     /// The distance from the node at `jump_to_node` to to next node that's eithe a leaf or a
     /// split
     next_major_node_dist: usize,
-    next_major_node: MajorNode
+    next_major_node: MajorNode,
+    depth: isize
 }
 
 impl<N: Eq, L> RawTree<N, L> {
@@ -58,12 +60,14 @@ impl<N: Eq, L> RawTree<N, L> {
                 self.jumps.get(parent_jump.parent_jump_index as usize)
                     .map(|j| RawCursor {
                         node_index: j.jump_to_node + j.next_major_node_dist as isize,
-                        parent_jump_index: parent_jump.parent_jump_index as usize
+                        parent_jump_index: parent_jump.parent_jump_index as usize,
+                        depth: cursor.depth - 1
                     })
             }
             false => Some(RawCursor {
                 node_index: cursor.node_index - 1,
-                ..cursor
+                parent_jump_index: cursor.parent_jump_index,
+                depth: cursor.depth - 1
             })
         }
     }
@@ -78,7 +82,8 @@ impl<N: Eq, L> RawTree<N, L> {
             (_, false) => {
                 direct_child = Some(RawCursor {
                     node_index: cursor.node_index + 1,
-                    parent_jump_index: cursor.parent_jump_index
+                    parent_jump_index: cursor.parent_jump_index,
+                    depth: cursor.depth + 1
                 }).into_iter().filter(|_| parent_jump.cursor_has_children(cursor)).next();
                 child_jump_search = self.jumps.len()..;
             }
@@ -96,9 +101,10 @@ impl<N: Eq, L> RawTree<N, L> {
         let jump_child_iter = self.jumps[child_jump_search.clone()].iter().cloned()
             .zip(child_jump_search)
             .take_while(move |&(s, _)| s.parent_jump_index == cursor.parent_jump_index as isize)
-            .map(|(s, i)| RawCursor {
+            .map(move |(s, i)| RawCursor {
                 node_index: s.jump_to_node,
-                parent_jump_index: i
+                parent_jump_index: i,
+                depth: cursor.depth + 1
             });
         direct_child.into_iter().chain(jump_child_iter)
     }
@@ -111,7 +117,8 @@ impl<N: Eq, L> RawTree<N, L> {
                 Some(potential_sibling_jump) if potential_sibling_jump.parent_jump_index == parent_jump.parent_jump_index =>
                     Some(RawCursor {
                         node_index: potential_sibling_jump.jump_to_node,
-                        parent_jump_index: sibling_jump_index
+                        parent_jump_index: sibling_jump_index,
+                        depth: cursor.depth
                     }),
                 _ => None
             }
@@ -134,7 +141,8 @@ impl<N: Eq, L> RawTree<N, L> {
 
         RawCursor {
             node_index: jump.jump_to_node + jump.next_major_node_dist as isize,
-            parent_jump_index: jump_index
+            parent_jump_index: jump_index,
+            depth: jump.depth + jump.next_major_node_dist as isize
         }
     }
 
@@ -191,11 +199,9 @@ impl<N: Eq, L> RawTree<N, L> {
         Ok(cursor)
     }
 
-    pub fn common_ancestor(&self, left: RawCursor, right: RawCursor) -> (RawCursor, usize) {
+    pub fn common_ancestor(&self, left: RawCursor, right: RawCursor) -> RawCursor {
         let mut left_parent_index = left.parent_jump_index as isize;
         let mut right_parent_index = right.parent_jump_index as isize;
-
-        let mut dist_from_left = (left.node_index - self.jumps[left_parent_index as usize].jump_to_node) as usize;
 
         while left_parent_index != right_parent_index {
             while left_parent_index < right_parent_index {
@@ -203,16 +209,16 @@ impl<N: Eq, L> RawTree<N, L> {
             }
             while right_parent_index < left_parent_index {
                 left_parent_index = self.jumps[left_parent_index as usize].parent_jump_index;
-                dist_from_left += 1 + self.jumps[left_parent_index as usize].next_major_node_dist;
             }
         }
 
         match self.jumps.get(left_parent_index as usize) {
-            Some(common_parent) => (RawCursor {
+            Some(common_parent) => RawCursor {
                 node_index: common_parent.jump_to_node + common_parent.next_major_node_dist as isize,
-                parent_jump_index: left_parent_index as usize
-            }, dist_from_left - common_parent.next_major_node_dist),
-            None => (RawCursor::root(), dist_from_left)
+                parent_jump_index: left_parent_index as usize,
+                depth: common_parent.depth + common_parent.next_major_node_dist as isize
+            },
+            None => RawCursor::root()
         }
     }
 
@@ -278,7 +284,8 @@ impl<N: Eq, L> RawTree<N, L> {
             let jump = self.jumps[jump_index];
             RawCursor {
                 node_index: jump.jump_to_node + jump.next_major_node_dist as isize,
-                parent_jump_index: jump_index
+                parent_jump_index: jump_index,
+                depth: jump.depth + jump.next_major_node_dist as isize
             }
         })
     }
@@ -342,10 +349,12 @@ impl<N: Eq, L> RawTree<N, L> {
         let (insert_continue_jump_index, insert_split_jump_index): (usize, usize);
         let leaf_jump_index: usize;
 
+        let jump_depth = cursor_parent_jump.depth + cursor.node_index - cursor_parent_jump.jump_to_node + 1;
         match insert_continue_jump {
             false => insert_continue_jump_index = usize::max_value(),
             true => {
                 let jump = Jump {
+                    depth: jump_depth,
                     parent_jump_index: cursor.parent_jump_index as isize,
                     jump_to_node: cursor.node_index + 1,
                     next_major_node_dist: (cursor_parent_jump.jump_to_node + cursor_parent_jump.next_major_node_dist as isize - (cursor.node_index + 1)) as usize,
@@ -367,6 +376,7 @@ impl<N: Eq, L> RawTree<N, L> {
             },
             true => {
                 let jump = Jump {
+                    depth: jump_depth,
                     parent_jump_index: cursor.parent_jump_index as isize,
                     jump_to_node: insert_node_index as isize,
                     next_major_node_dist: num_nodes_insert - 1,
@@ -501,7 +511,8 @@ impl<N: Eq, L> RawTree<N, L> {
                 MajorNode::Leaf{..} => cursor.parent_jump_index,
                 MajorNode::Jump{..} if insert_split_jump => insert_split_jump_index,
                 MajorNode::Jump{child_jump_index} => child_jump_index
-            }
+            },
+            depth: cursor.depth + num_nodes_insert as isize
         }
     }
 
@@ -614,6 +625,7 @@ impl Jump {
     #[inline]
     fn default_root() -> Jump {
         Jump {
+            depth: -1,
             parent_jump_index: -1,
             jump_to_node: -1,
             next_major_node_dist: 0,
@@ -637,8 +649,13 @@ impl RawCursor {
     pub fn root() -> RawCursor {
         RawCursor {
             node_index: -1,
-            parent_jump_index: 0
+            parent_jump_index: 0,
+            depth: -1
         }
+    }
+
+    pub fn depth(self) -> isize {
+        self.depth
     }
 }
 

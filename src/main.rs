@@ -39,6 +39,9 @@ fn main() {
                 cursor.sibling(1).unwrap_occupied().enter();
             }
         }
+        for _ in 0..cursor.depth() {
+            print!("    ");
+        }
         println!("{:?} {:?}", cursor.node(), cursor.leaf());
     }
 }
@@ -128,6 +131,10 @@ impl<N, L, T> Cursor<N, L, T>
 {
     pub fn at_root(&self) -> bool {
         self.raw == RawCursor::root()
+    }
+
+    pub fn depth(&self) -> isize {
+        self.raw.depth()
     }
 
     /// # Panics
@@ -277,15 +284,15 @@ impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
         self.cursor
     }
 
-    pub fn enter_route(self) -> impl 'a + Iterator<Item=CursorMove<'a, N>> {
-        let old_raw = self.cursor.raw;
-        self.cursor.raw = self.move_to;
-        let tree = &self.cursor.tree.borrow().0;
-        let (ancestor, elevate_dist) = tree.common_ancestor(old_raw, self.move_to);
-        iter::repeat(()).map(|_| CursorMove::Parent).take(elevate_dist)
-            .chain(tree.route_to_descendant(ancestor, self.move_to)
-            .map(|n| CursorMove::Child(n)))
-    }
+    // pub fn enter_route(self) -> impl 'a + Iterator<Item=CursorMove<'a, N>> {
+    //     let old_raw = self.cursor.raw;
+    //     self.cursor.raw = self.move_to;
+    //     let tree = &self.cursor.tree.borrow().0;
+    //     let (ancestor, elevate_dist) = tree.common_ancestor(old_raw, self.move_to);
+    //     iter::repeat(()).map(|_| CursorMove::Parent).take(elevate_dist)
+    //         .chain(tree.route_to_descendant(ancestor, self.move_to)
+    //         .map(|n| CursorMove::Child(n)))
+    // }
 }
 
 impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
