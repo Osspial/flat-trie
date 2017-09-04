@@ -453,15 +453,6 @@ impl<N: Eq, L> RawTree<N, L> {
             }
         }
         self.nodes.splice(insert_node_index..insert_node_index, Some(first_node).into_iter().chain(nodes));
-        if let Some(range) = children_rotate_range {
-            let jump = self.jumps[range.start];
-            match self.jumps[jump.parent_jump_index as usize].next_major_node {
-                MajorNode::Jump{ref mut child_jump_index} => *child_jump_index += (children_rotate_to - range.start) - range.len(),
-                MajorNode::Leaf{..} => panic!("tree corrupted")
-            }
-
-            self.jumps[range.start..children_rotate_to].rotate(range.len());
-        }
 
         if let Some(leaf) = leaf_opt {
             match self.jumps[leaf_jump_index].next_major_node {
@@ -490,6 +481,16 @@ impl<N: Eq, L> RawTree<N, L> {
                 };
             }
             parent_jump_mut.next_major_node_dist = (!jump_inserted) as usize + (cursor.node_index - parent_jump_mut.jump_to_node) as usize;
+        }
+
+        if let Some(range) = children_rotate_range {
+            let jump = self.jumps[range.start];
+            match self.jumps[jump.parent_jump_index as usize].next_major_node {
+                MajorNode::Jump{ref mut child_jump_index} => *child_jump_index += (children_rotate_to - range.start) - range.len(),
+                MajorNode::Leaf{..} => panic!("tree corrupted")
+            }
+
+            self.jumps[range.start..children_rotate_to].rotate(range.len());
         }
 
         self.verify_tree_integrity();

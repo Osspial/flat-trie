@@ -14,15 +14,16 @@ fn main() {
         let mut cursor = tree.cursor_mut();
         cursor
             .child("a").or_insert(None).enter()
-                .child("a.a").or_insert(None).enter()
+                .child("a.a").or_insert(Some(32)).enter()
                 .child("a.a.a").or_insert(None).enter()
                 .child("a.a.a.a").or_insert(None).cont().parent().enter()
                 .child("a.a.b").or_insert(None).cont().parent().enter().parent().enter()
-            .child("b").or_insert(None).cont()
-            .child("c").or_insert(None).enter()
+            .child("b").or_insert(Some(64)).cont()
+            .child("c").or_insert(Some(128)).enter()
                 .child("c.a").or_insert(None).cont().parent().enter()
             .child("d").or_insert(None);
     }
+    println!("{:#?}", tree.0);
     let mut cursor = tree.cursor();
     'traverse: loop {
         let child_opt = cursor.direct_children().next().cloned();
@@ -38,7 +39,7 @@ fn main() {
                 cursor.sibling(1).unwrap_occupied().enter();
             }
         }
-        println!("{:?}", cursor.node());
+        println!("{:?} {:?}", cursor.node(), cursor.leaf());
     }
 }
 
