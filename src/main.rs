@@ -1,59 +1,44 @@
-#![feature(conservative_impl_trait, splice)]
+#![feature(conservative_impl_trait, splice, slice_rotate, range_contains)]
 extern crate odds;
 mod raw;
 
 use raw::*;
 
-use std::iter::{self, ExactSizeIterator};
-use std::borrow::Borrow;
+use std::iter;
+use std::borrow::{Borrow, BorrowMut};
+use std::marker::PhantomData;
 
 fn main() {
     let mut tree: LongTree<_, i32> = LongTree(RawTree::new());
     {
         let mut cursor = tree.cursor_mut();
-        cursor.insert_node("a", None);
-        cursor.insert_node("b", None);
-        cursor.insert_node("c", None);
-        cursor.insert_node("d", None);
-        {
-            cursor.enter_child("a").unwrap();
-            cursor.insert_node("a.a", None);
-
-            {
-                cursor.enter_child("a.a").unwrap();
-                cursor.insert_node("a.a.a", None);
-                cursor.insert_node("a.a.b", None);
-                cursor.enter_parent().unwrap();
-            }
-            cursor.enter_parent().unwrap();
-        }
-        {
-            cursor.enter_child("b").unwrap();
-            cursor.insert_nodes(["b.a", "b.a.a"].into_iter().cloned(), Some(16));
-            cursor.enter_parent().unwrap();
-        }
+        cursor
+            .child("a").or_insert(None).enter()
+                .child("a.a").or_insert(None).enter()
+                .child("a.a.a").or_insert(None).enter()
+                .child("a.a.a.a").or_insert(None).cont().parent().enter()
+                .child("a.a.b").or_insert(None).cont().parent().enter().parent().enter()
+            .child("b").or_insert(None).cont()
+            .child("c").or_insert(None).enter()
+                .child("c.a").or_insert(None).cont().parent().enter()
+            .child("d").or_insert(None);
     }
     let mut cursor = tree.cursor();
     'traverse: loop {
         let child_opt = cursor.direct_children().next().cloned();
         match child_opt {
-            Some(child) => {cursor.enter_child(child).unwrap();},
+            Some(child) => {cursor.child(child).unwrap_occupied().enter();},
             None => {
-                while cursor.enter_sibling(1).is_err() {
-                    let is_root = cursor.enter_parent().is_err();
-                    if is_root {
+                while let Entry::Vacant(..) = cursor.sibling(1) {
+                    cursor.parent().enter();
+                    if cursor.at_root() {
                         break 'traverse;
                     }
                 }
+                cursor.sibling(1).unwrap_occupied().enter();
             }
         }
         println!("{:?}", cursor.node());
-    }
-
-    let mut cursor = *tree.cursor().enter_child("a").unwrap().enter_child("a.a").unwrap();
-    let mut cursor_clone = cursor.clone();
-    for m in cursor.move_to_cursor(*cursor_clone.find_leaf_after_wrapping(&16).unwrap()) {
-        println!("{:?}", m);
     }
 }
 
@@ -61,14 +46,41 @@ fn main() {
 pub struct LongTree<N: Eq, L>(RawTree<N, L>);
 
 #[derive(Clone, Copy)]
-pub struct Cursor<'a, N: 'a + Eq, L: 'a> {
-    tree: &'a RawTree<N, L>,
-    raw: RawCursor
+pub struct Cursor<N, L, T>
+    where N: Eq,
+          T: Borrow<LongTree<N, L>>
+{
+    tree: T,
+    raw: RawCursor,
+    _marker: PhantomData<(N, L)>
 }
 
-pub struct CursorMut<'a, N: 'a + Eq, L: 'a> {
-    tree: &'a mut RawTree<N, L>,
-    raw: RawCursor
+pub enum Entry<'a, N, O, L, T>
+    where N: 'a + Eq,
+          L: 'a,
+          T: 'a + Borrow<LongTree<N, L>>
+{
+    Occupied(OccupiedEntry<'a, N, L, T>),
+    Vacant(VacantEntry<'a, N, O, L, T>)
+}
+
+pub struct OccupiedEntry<'a, N, L, T>
+    where N: 'a + Eq,
+          L: 'a,
+          T: 'a + Borrow<LongTree<N, L>>
+{
+    cursor: &'a mut Cursor<N, L, T>,
+    move_to: RawCursor
+}
+
+pub struct VacantEntry<'a, N, O, L, T>
+    where N: 'a + Eq,
+          L: 'a,
+          T: 'a + Borrow<LongTree<N, L>>
+{
+    cursor: &'a mut Cursor<N, L, T>,
+    node: O,
+    insert_after: RawCursor
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,128 +104,239 @@ impl<N: Eq, L> LongTree<N, L> {
         LongTree(RawTree::new())
     }
 
-    pub fn cursor(&self) -> Cursor<N, L> {
+    pub fn cursor(&self) -> Cursor<N, L, &Self> {
         Cursor {
-            tree: &self.0,
-            raw: RawCursor::root()
+            tree: self,
+            raw: RawCursor::root(),
+            _marker: PhantomData
         }
     }
 
-    pub fn cursor_mut(&mut self) -> CursorMut<N, L> {
-        CursorMut {
-            tree: &mut self.0,
-            raw: RawCursor::root()
+    pub fn cursor_mut(&mut self) -> Cursor<N, L, &mut Self> {
+        Cursor {
+            tree: self,
+            raw: RawCursor::root(),
+            _marker: PhantomData
         }
     }
 }
 
-macro_rules! impl_cursor_common {
-    ($(impl $Cursor:ident;)+) => {$(
-        impl<'a, N: Eq, L> $Cursor<'a, N, L> {
-            pub fn at_root(&self) -> bool {
-                self.raw == RawCursor::root()
-            }
-
-            pub fn node(&self) -> &N {
-                self.tree.get_node(self.raw).unwrap()
-            }
-
-            pub fn leaf(&self) -> Option<&L> {
-                self.tree.node_leaf(self.raw)
-            }
-
-            pub fn direct_children<'b>(&'b self) -> impl 'b + Iterator<Item=&'b N> {
-                self.tree.node_direct_children(self.raw).map(move |rc| self.tree.get_node(rc).unwrap())
-            }
-
-            pub fn enter_sibling(&mut self, sibling_dist: isize) -> Result<&mut Self, FindError> {
-                self.raw = self.tree.get_sibling(self.raw, sibling_dist).ok_or(FindError::NodeNotFound)?;
-                Ok(self)
-            }
-
-            pub fn move_to_cursor<'b>(&'b mut self, cursor: Cursor<N, L>) -> impl 'b + Iterator<Item=CursorMove<'b, N>> {
-                let old_raw = self.raw;
-                self.raw = cursor.raw;
-                let (ancestor, elevate_dist) = self.tree.common_ancestor(old_raw, cursor.raw);
-                iter::repeat(()).map(|_| CursorMove::Parent).take(elevate_dist)
-                    .chain(self.tree.route_to_descendant(ancestor, cursor.raw)
-                    .map(|n| CursorMove::Child(n)))
-            }
-
-            pub fn enter_child<O>(&mut self, node: &O) -> Result<&mut Self, FindError>
-                where N: Borrow<O>,
-                      O: Eq + ?Sized
-            {
-                let child = self.tree.node_direct_children(self.raw).find(|rc| node == self.tree.get_node(*rc).unwrap().borrow());
-                match child {
-                    Some(child) => {
-                        self.raw = child;
-                        Ok(self)
-                    },
-                    None => Err(FindError::NodeNotFound)
-                }
-            }
-
-            pub fn enter_parent(&mut self) -> Result<&mut Self, EnterParentError> {
-                match self.tree.node_parent(self.raw) {
-                    Some(raw) => {
-                        self.raw = raw;
-                        Ok(self)
-                    },
-                    None => Err(EnterParentError::AtRoot)
-                }
-            }
-
-            pub fn find_leaf_after_wrapping<M>(&mut self, leaf: &M) -> Result<&mut Self, FindError>
-                where M: Eq,
-                      L: Borrow<M>
-            {
-                let cursor_opt = self.tree.find_leaf_after_wrapping(self.raw, leaf);
-                match cursor_opt {
-                    Some(raw) => {
-                        self.raw = raw;
-                        Ok(self)
-                    },
-                    None => Err(FindError::NodeNotFound)
-                }
-            }
-        }
-    )+}
-}
-
-impl_cursor_common!{
-    impl Cursor;
-    impl CursorMut;
-}
-
-impl<'a, N: Eq, L> CursorMut<'a, N, L> {
-    pub fn insert_node(&mut self, node: N, leaf: Option<L>) {
-        self.tree.insert_nodes_after(self.raw, Some(node), leaf);
+impl<N, L, T> Cursor<N, L, T>
+    where N: Eq,
+          T: Borrow<LongTree<N, L>>
+{
+    pub fn at_root(&self) -> bool {
+        self.raw == RawCursor::root()
     }
 
-    pub fn insert_nodes<I>(&mut self, nodes: I, leaf: Option<L>)
-        where I: IntoIterator<Item=N>,
-              I::IntoIter: ExactSizeIterator
+    /// # Panics
+    /// Panics if the cursor is at the root node.
+    pub fn node(&self) -> &N {
+        self.tree.borrow().0.get_node(self.raw).expect("Attempted to take node of root")
+    }
+
+    pub fn leaf(&self) -> Option<&L> {
+        self.tree.borrow().0.get_leaf(self.raw)
+    }
+
+    // pub fn leaf_mut(&self) -> Option<&mut L> {
+    //     self.tree.borrow().0.get_leaf_mut(self.raw)
+    // }
+
+    pub fn direct_children<'b>(&'b self) -> impl 'b + Iterator<Item=&'b N> {
+        let tree = &self.tree.borrow().0;
+        tree.node_direct_children(self.raw).map(move |rc| tree.get_node(rc).unwrap())
+    }
+
+    pub fn sibling(&mut self, sibling_dist: isize) -> Entry<N, (), L, T> {
+        match self.tree.borrow().0.get_sibling(self.raw, sibling_dist) {
+            Some(sibling) => Entry::Occupied(OccupiedEntry {
+                cursor: self,
+                move_to: sibling
+            }),
+            None => Entry::Vacant(VacantEntry {
+                insert_after: self.tree.borrow().0.node_parent(self.raw).expect("Attempted to take sibling of root"),
+                node: (),
+                cursor: self
+            })
+        }
+    }
+
+    pub fn child<O>(&mut self, node: O) -> Entry<N, O, L, T>
+        where N: PartialEq<O>
     {
-        self.tree.insert_nodes_after(self.raw, nodes, leaf);
+        let child = {
+            let tree = &self.tree.borrow().0;
+            tree.node_direct_children(self.raw).find(|rc| *tree.get_node(*rc).unwrap() == node)
+        };
+        match child {
+            Some(child) => Entry::Occupied(OccupiedEntry {
+                cursor: self,
+                move_to: child
+            }),
+            None => Entry::Vacant(VacantEntry {
+                insert_after: self.raw,
+                node: node,
+                cursor: self
+            })
+        }
     }
 
-    pub fn insert_node_enter(&mut self, node: N, leaf: Option<L>) {
-        self.raw = self.tree.insert_nodes_after(self.raw, Some(node), leaf);
+    // pub fn child_through<I, O>(&mut self, nodes: I) -> Entry<N, O, L, T>
+    //     where I: IntoIterator<Item=&'b O>,
+    //           N: Borrow<O>,
+    //           O: 'b + Eq + ?Sized
+    // {
+    //     let child = self.tree.borrow().0.node_enter_children(self.raw, nodes);
+    //     match child {
+    //         Some(child) => Entry::Occupied(OccupiedEntry {
+    //             cursor: self,
+    //             move_to: child
+    //         }),
+    //         None => Entry::Vacant(VacantEntry {
+    //             insert_after: self.raw,
+    //             node: node,
+    //             cursor: self
+    //         })
+    //     }
+    // }
+
+    pub fn parent(&mut self) -> OccupiedEntry<N, L, T> {
+        let parent = self.tree.borrow().0.node_parent(self.raw).expect("Attempted to take parent of root");
+        OccupiedEntry {
+            cursor: self,
+            move_to: parent
+        }
     }
 
-    pub fn insert_nodes_enter<I>(&mut self, nodes: I, leaf: Option<L>)
-        where I: IntoIterator<Item=N>,
-              I::IntoIter: ExactSizeIterator
-    {
-        self.raw = self.tree.insert_nodes_after(self.raw, nodes, leaf);
+    // pub fn find_leaf_after_wrapping<'a, M>(&'a mut self, leaf: &M) -> Result<Entry<'a, N, L, T>, &mut Self>
+    //     where M: Eq,
+    //           L: Borrow<M>
+    // {
+    //     let cursor_opt = self.tree.borrow().0.find_leaf_after_wrapping(self.raw, leaf);
+    //     match cursor_opt {
+    //         Some(raw) => {
+    //             self.raw = raw;
+    //             Ok(self)
+    //         },
+    //         None => Err(FindError::NodeNotFound)
+    //     }
+    // }
+}
+
+impl<'a, N, L, T> Entry<'a, N, N, L, T>
+    where N: Eq,
+          T: BorrowMut<LongTree<N, L>>
+{
+    pub fn or_insert(self, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
+        match self {
+            Entry::Occupied(occupied) => occupied,
+            Entry::Vacant(vacant) => vacant.insert(leaf)
+        }
+    }
+}
+
+impl<'a, N, O, L, T> Entry<'a, N, O, L, T>
+    where N: Eq,
+          T: Borrow<LongTree<N, L>>
+{
+    pub fn unwrap_occupied(self) -> OccupiedEntry<'a, N, L, T> {
+        match self {
+            Entry::Occupied(occupied) => occupied,
+            Entry::Vacant(..) => panic!("called `Entry::unwrap_occupied()` on a `Vacant` value")
+        }
     }
 
-    /// Prune the node selected by the cursor and all descendants, and move the cursor up to the
-    /// parent node.
+    pub fn unwrap_vacant(self) -> VacantEntry<'a, N, O, L, T> {
+        match self {
+            Entry::Vacant(vacant) => vacant,
+            Entry::Occupied(..) => panic!("called `Entry::unwrap_vacant()` on an `Occupied` value")
+        }
+    }
+}
+
+impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
+    where N: Eq,
+          T: Borrow<LongTree<N, L>>
+{
+    pub fn cont(self) -> &'a mut Cursor<N, L, T> {
+        self.cursor
+    }
+
+    pub fn node(&self) -> &N {
+        self.cursor.tree.borrow().0.get_node(self.move_to).unwrap()
+    }
+
+    pub fn leaf(&self) -> Option<&L> {
+        self.cursor.tree.borrow().0.get_leaf(self.move_to)
+    }
+
+    pub fn enter(self) -> &'a mut Cursor<N, L, T> {
+        self.cursor.raw = self.move_to;
+        self.cursor
+    }
+
+    pub fn enter_route(self) -> impl 'a + Iterator<Item=CursorMove<'a, N>> {
+        let old_raw = self.cursor.raw;
+        self.cursor.raw = self.move_to;
+        let tree = &self.cursor.tree.borrow().0;
+        let (ancestor, elevate_dist) = tree.common_ancestor(old_raw, self.move_to);
+        iter::repeat(()).map(|_| CursorMove::Parent).take(elevate_dist)
+            .chain(tree.route_to_descendant(ancestor, self.move_to)
+            .map(|n| CursorMove::Child(n)))
+    }
+}
+
+impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
+    where N: Eq,
+          T: BorrowMut<LongTree<N, L>>
+{
+    pub fn leaf_mut(&mut self) -> Option<&mut L> {
+        self.cursor.tree.borrow_mut().0.get_leaf_mut(self.move_to)
+    }
+
     pub fn prune(&mut self) {
-        self.tree.prune_node(self.raw);
-        self.raw = self.tree.node_parent(self.raw).unwrap_or(RawCursor::root());
+        self.cursor.tree.borrow_mut().0.prune_node(self.move_to);
+    }
+}
+
+impl<'a, N, L, T> VacantEntry<'a, N, N, L, T>
+    where N: Eq,
+          T: BorrowMut<LongTree<N, L>>
+{
+    pub fn insert(self, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
+        let insert_cursor = self.cursor.tree.borrow_mut().0.insert_nodes_after(self.insert_after, Some(self.node), leaf);
+        OccupiedEntry {
+            cursor: self.cursor,
+            move_to: insert_cursor
+        }
+    }
+}
+
+impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
+    where N: Eq + Borrow<O>,
+          O: ToOwned<Owned=N>,
+          T: BorrowMut<LongTree<N, L>>
+{
+    pub fn insert_cloned(self, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
+        let insert_cursor = self.cursor.tree.borrow_mut().0.insert_nodes_after(self.insert_after, Some(self.node.to_owned() ), leaf);
+        OccupiedEntry {
+            cursor: self.cursor,
+            move_to: insert_cursor
+        }
+    }
+}
+
+impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
+    where N: Eq,
+          T: BorrowMut<LongTree<N, L>>
+{
+    pub fn insert_node(self, node: N, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
+        let insert_cursor = self.cursor.tree.borrow_mut().0.insert_nodes_after(self.insert_after, Some(node), leaf);
+        OccupiedEntry {
+            cursor: self.cursor,
+            move_to: insert_cursor
+        }
     }
 }
 
