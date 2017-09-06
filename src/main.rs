@@ -13,14 +13,14 @@ fn main() {
     {
         let mut cursor = tree.cursor_mut();
         cursor.child("a").or_insert(None).enter()
-              .child("a.a").or_insert(Some(32)).enter()
-              .child("a.a.a").or_insert(Some(48)).enter()
-                  .child("a.a.a.a").or_insert(None).cont().parent().enter().parent().enter()
-              .child("a.a.b").or_insert(Some(83)).cont().parent().enter()
-              .child("b").or_insert(Some(64)).cont();
+            .child("a.a").or_insert(Some(32)).enter()
+            .child("a.a.a").or_insert(Some(48)).enter()
+                .child("a.a.a.a").or_insert(None).cont().parent().enter()
+                .child("a.a.b").or_insert(Some(83)).cont().parent().enter().parent().enter()
+            .child("b").or_insert(Some(64)).cont();
 
         println!("{:#?}", cursor.tree);
-        cursor.child("a").unwrap_occupied().enter().child("a.a").unwrap_occupied().prune();
+        cursor.child("b").unwrap_occupied().prune();
         println!("{:#?}", cursor.tree);
     }
 

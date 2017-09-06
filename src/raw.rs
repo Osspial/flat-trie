@@ -594,19 +594,26 @@ impl<N: Eq, L> RawTree<N, L> {
             self.leaves.clear();
         } else {
             let last_child_node = self.last_child_node(cursor);
-            let first_child_jump_index: usize;
 
             let parent_jump = self.jumps[cursor.parent_jump_index];
-            first_child_jump_index = match parent_jump.next_major_node {
+            let first_child_jump_index = match parent_jump.next_major_node {
                 MajorNode::LeafJump{child_jump_index, ..} |
                 MajorNode::Jump{child_jump_index} => child_jump_index,
                 MajorNode::Leaf{..} => usize::max_value()
             };
 
+            let parent_leaf_index: isize;
+
             {
                 let parent_jump_mut = &mut self.jumps[cursor.parent_jump_index];
+                parent_leaf_index = match parent_jump_mut.next_major_node {
+                    MajorNode::Leaf{leaf_index} => leaf_index,
+                    MajorNode::LeafJump{leaf_index, ..} => leaf_index as isize,
+                    MajorNode::Jump{..} => -1
+                };
+
                 parent_jump_mut.next_major_node = MajorNode::Leaf{ leaf_index: -1 };
-                parent_jump_mut.next_major_node_dist = (cursor.node_index - parent_jump.jump_to_node) as usize;
+                parent_jump_mut.next_major_node_dist = ((cursor.node_index - 1) - parent_jump.jump_to_node) as usize;
             }
 
 
@@ -614,8 +621,8 @@ impl<N: Eq, L> RawTree<N, L> {
 
             let nodes_removed = (last_child_node.node_index + 1) - cursor.node_index;
             let remove_parent_jump_index = match cursor.node_index == parent_jump.jump_to_node {
-                true => cursor.parent_jump_index,
-                false => usize::max_value()
+                true => cursor.parent_jump_index as isize,
+                false => isize::max_value()
             };
 
             let mut retain_index = 0;
@@ -636,7 +643,7 @@ impl<N: Eq, L> RawTree<N, L> {
 
                 {
                     let jump_offset = |jump_index: isize| {
-                        ((remove_parent_jump_index as isize) < jump_index) as usize +
+                        (remove_parent_jump_index < jump_index) as usize +
                         match first_child_jump_index <= retain_index && last_child_node.node_index < jump_index {
                             false => 0,
                             true => child_jump_count
@@ -649,7 +656,13 @@ impl<N: Eq, L> RawTree<N, L> {
                             *child_jump_index -= jump_offset(*child_jump_index as isize);
                         }
                         MajorNode::Leaf{ref mut leaf_index} if *leaf_index != -1 => {
-                            if retain_index < first_child_jump_index {
+                            if parent_leaf_index != -1 && parent_leaf_index < *leaf_index {
+                                *leaf_index -= 1;
+                            }
+                            if retain_index == cursor.parent_jump_index {
+                                leaf_remove_range.start = *leaf_index as usize;
+                                leaf_remove_range.end = leaf_remove_range.start;
+                            } else if retain_index < first_child_jump_index {
                                 // This branch is before the child jump range
                                 leaf_remove_range.start = (*leaf_index + 1) as usize;
                                 leaf_remove_range.end = leaf_remove_range.start;
@@ -663,7 +676,13 @@ impl<N: Eq, L> RawTree<N, L> {
                         },
                         MajorNode::LeafJump{ref mut child_jump_index, ref mut leaf_index} => {
                             *child_jump_index -= jump_offset(*child_jump_index as isize);
-                            if retain_index < first_child_jump_index {
+                            if parent_leaf_index != -1 && (parent_leaf_index as usize) < *leaf_index {
+                                *leaf_index -= 1;
+                            }
+                            if retain_index + 1 == cursor.parent_jump_index {
+                                leaf_remove_range.start = *leaf_index;
+                                leaf_remove_range.end = leaf_remove_range.start;
+                            } else if retain_index < first_child_jump_index {
                                 // This branch is before the child jump range
                                 leaf_remove_range.start = *leaf_index + 1;
                                 leaf_remove_range.end = leaf_remove_range.start;
@@ -687,6 +706,9 @@ impl<N: Eq, L> RawTree<N, L> {
                 retain
             });
             self.leaves.splice(leaf_remove_range, None);
+            if parent_leaf_index != -1 {
+                self.leaves.remove(parent_leaf_index as usize);
+            }
             self.verify_tree_integrity();
         }
     }
