@@ -1,4 +1,4 @@
-#![feature(conservative_impl_trait, splice, slice_rotate, range_contains)]
+#![feature(conservative_impl_trait, splice, slice_rotate, range_contains, specialization)]
 extern crate odds;
 mod raw;
 
@@ -12,18 +12,18 @@ fn main() {
     let mut tree: LongTree<_, i32> = LongTree(RawTree::new());
     {
         let mut cursor = tree.cursor_mut();
-        cursor
-            .child("a").or_insert(None).enter()
-                .child("a.a").or_insert(Some(32)).enter()
-                .child("a.a.a").or_insert(None).enter()
-                .child("a.a.a.a").or_insert(None).cont().parent().enter()
-                .child("a.a.b").or_insert(None).cont().parent().enter().parent().enter()
-            .child("b").or_insert(Some(64)).cont()
-            .child("c").or_insert(Some(128)).enter()
-                .child("c.a").or_insert(None).cont().parent().enter()
-            .child("d").or_insert(None);
+        cursor.child("a").or_insert(None).enter()
+              .child("a.a").or_insert(Some(32)).enter()
+              .child("a.a.a").or_insert(Some(48)).enter()
+                  .child("a.a.a.a").or_insert(None).cont().parent().enter().parent().enter()
+              .child("a.a.b").or_insert(Some(83)).cont().parent().enter()
+              .child("b").or_insert(Some(64)).cont();
+
+        println!("{:#?}", cursor.tree);
+        cursor.child("a").unwrap_occupied().enter().child("a.a").unwrap_occupied().prune();
+        println!("{:#?}", cursor.tree);
     }
-    println!("{:#?}", tree.0);
+
     let mut cursor = tree.cursor();
     'traverse: loop {
         let child_opt = cursor.direct_children().next().cloned();
