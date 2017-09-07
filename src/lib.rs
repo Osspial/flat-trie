@@ -130,6 +130,14 @@ impl<N: Eq, L> FlatTrie<N, L> {
             _marker: PhantomData
         }
     }
+
+    pub fn cursor_owned(self) -> Cursor<N, L, Self> {
+        Cursor {
+            tree: self,
+            raw: RawCursor::root(),
+            _marker: PhantomData
+        }
+    }
 }
 
 impl<N, L, T> Cursor<N, L, T>
@@ -244,6 +252,10 @@ impl<N, L, T> Cursor<N, L, T>
             },
             None => Err(self)
         }
+    }
+
+    pub fn to_tree(self) -> T {
+        self.tree
     }
 }
 
@@ -360,6 +372,12 @@ impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
             cursor: self.cursor,
             move_to: insert_cursor
         }
+    }
+}
+
+impl<N: Eq, L, T: Borrow<FlatTrie<N, L>>> Borrow<FlatTrie<N, L>> for Cursor<N, L, T> {
+    fn borrow(&self) -> &FlatTrie<N, L> {
+        self.tree.borrow()
     }
 }
 
