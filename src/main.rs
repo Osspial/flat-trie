@@ -227,7 +227,13 @@ impl<N, L, T> Cursor<N, L, T>
     pub fn find_leaf_after_wrapping<'a, M>(&'a mut self, leaf: M) -> Result<OccupiedEntry<'a, N, L, T>, &mut Self>
         where L: PartialEq<M>
     {
-        let cursor_opt = self.tree.borrow().0.find_leaf_after_wrapping(self.raw, leaf);
+        self.find_leaf_after_wrapping_by(|l| *l == leaf)
+    }
+
+    pub fn find_leaf_after_wrapping_by<'a, F>(&'a mut self, by: F) -> Result<OccupiedEntry<'a, N, L, T>, &mut Self>
+        where F: FnMut(&L) -> bool
+    {
+        let cursor_opt = self.tree.borrow().0.find_leaf_after_wrapping_by(self.raw, by);
         match cursor_opt {
             Some(raw) => {
                 self.raw = raw;

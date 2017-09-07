@@ -275,15 +275,15 @@ impl<N: Eq, L> RawTrie<N, L> {
         )
     }
 
-    fn find_leaf<M, I>(&self, leaf: M, ranges: I) -> Option<RawCursor>
-        where L: PartialEq<M>,
+    fn find_leaf_by<F, I>(&self, mut by: F, ranges: I) -> Option<RawCursor>
+        where F: FnMut(&L) -> bool,
               I: IntoIterator<Item=Range<usize>>
     {
         let mut leaf_jump_index_opt = None;
         for (jump, jump_index) in ranges.into_iter().flat_map(|r| self.jumps[r.clone()].iter().zip(r)) {
             match jump.next_major_node {
                 MajorNode::Leaf{leaf_index} if leaf_index != -1 => {
-                    if *self.leaves[leaf_index as usize].borrow() == leaf {
+                    if by(&self.leaves[leaf_index as usize]) {
                         leaf_jump_index_opt = Some(jump_index);
                         break;
                     }
@@ -302,14 +302,14 @@ impl<N: Eq, L> RawTrie<N, L> {
         })
     }
 
-    pub fn find_leaf_after_wrapping<M>(&self, cursor: RawCursor, leaf: M) -> Option<RawCursor>
-        where L: PartialEq<M>
+    pub fn find_leaf_after_wrapping_by<F>(&self, cursor: RawCursor, by: F) -> Option<RawCursor>
+        where F: FnMut(&L) -> bool
     {
         if self.leaves.len() == 0 {
             return None;
         }
 
-        self.find_leaf(leaf, [cursor.parent_jump_index + 1..self.jumps.len(), 0..cursor.parent_jump_index + 1].iter().cloned())
+        self.find_leaf_by(by, [cursor.parent_jump_index + 1..self.jumps.len(), 0..cursor.parent_jump_index + 1].iter().cloned())
     }
 
     pub fn insert_nodes_after<I>(&mut self, cursor: RawCursor, nodes: I, leaf_opt: Option<L>) -> RawCursor
