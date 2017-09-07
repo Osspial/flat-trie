@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 use std::fmt::{self, Debug, Formatter};
 
 fn main() {
-    let mut tree: LongTree<_, i32> = LongTree(RawTree::new());
+    let mut tree: FlatTrie<_, i32> = FlatTrie(RawTrie::new());
     {
         let mut cursor = tree.cursor_mut();
         cursor.child("a").or_insert(None).enter()
@@ -53,12 +53,12 @@ fn main() {
 }
 
 #[derive(Debug)]
-pub struct LongTree<N: Eq, L>(RawTree<N, L>);
+pub struct FlatTrie<N: Eq, L>(RawTrie<N, L>);
 
 #[derive(Clone, Copy)]
 pub struct Cursor<N, L, T>
     where N: Eq,
-          T: Borrow<LongTree<N, L>>
+          T: Borrow<FlatTrie<N, L>>
 {
     tree: T,
     raw: RawCursor,
@@ -69,7 +69,7 @@ pub struct Cursor<N, L, T>
 pub enum Entry<'a, N, O, L, T>
     where N: 'a + Eq,
           L: 'a,
-          T: 'a + Borrow<LongTree<N, L>>
+          T: 'a + Borrow<FlatTrie<N, L>>
 {
     Occupied(OccupiedEntry<'a, N, L, T>),
     Vacant(VacantEntry<'a, N, O, L, T>)
@@ -78,7 +78,7 @@ pub enum Entry<'a, N, O, L, T>
 pub struct OccupiedEntry<'a, N, L, T>
     where N: 'a + Eq,
           L: 'a,
-          T: 'a + Borrow<LongTree<N, L>>
+          T: 'a + Borrow<FlatTrie<N, L>>
 {
     cursor: &'a mut Cursor<N, L, T>,
     move_to: RawCursor
@@ -87,7 +87,7 @@ pub struct OccupiedEntry<'a, N, L, T>
 pub struct VacantEntry<'a, N, O, L, T>
     where N: 'a + Eq,
           L: 'a,
-          T: 'a + Borrow<LongTree<N, L>>
+          T: 'a + Borrow<FlatTrie<N, L>>
 {
     cursor: &'a mut Cursor<N, L, T>,
     node: O,
@@ -110,9 +110,9 @@ pub enum EnterParentError {
     AtRoot
 }
 
-impl<N: Eq, L> LongTree<N, L> {
-    pub fn new() -> LongTree<N, L> {
-        LongTree(RawTree::new())
+impl<N: Eq, L> FlatTrie<N, L> {
+    pub fn new() -> FlatTrie<N, L> {
+        FlatTrie(RawTrie::new())
     }
 
     pub fn cursor(&self) -> Cursor<N, L, &Self> {
@@ -134,7 +134,7 @@ impl<N: Eq, L> LongTree<N, L> {
 
 impl<N, L, T> Cursor<N, L, T>
     where N: Eq,
-          T: Borrow<LongTree<N, L>>
+          T: Borrow<FlatTrie<N, L>>
 {
     pub fn at_root(&self) -> bool {
         self.raw == RawCursor::root()
@@ -243,7 +243,7 @@ impl<N, L, T> Cursor<N, L, T>
 
 impl<'a, N, L, T> Entry<'a, N, N, L, T>
     where N: Eq,
-          T: BorrowMut<LongTree<N, L>>
+          T: BorrowMut<FlatTrie<N, L>>
 {
     pub fn or_insert(self, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
         match self {
@@ -255,7 +255,7 @@ impl<'a, N, L, T> Entry<'a, N, N, L, T>
 
 impl<'a, N, O, L, T> Entry<'a, N, O, L, T>
     where N: Eq,
-          T: Borrow<LongTree<N, L>>
+          T: Borrow<FlatTrie<N, L>>
 {
     pub fn unwrap_occupied(self) -> OccupiedEntry<'a, N, L, T> {
         match self {
@@ -274,7 +274,7 @@ impl<'a, N, O, L, T> Entry<'a, N, O, L, T>
 
 impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
     where N: Eq,
-          T: Borrow<LongTree<N, L>>
+          T: Borrow<FlatTrie<N, L>>
 {
     pub fn cont(self) -> &'a mut Cursor<N, L, T> {
         self.cursor
@@ -306,7 +306,7 @@ impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
 
 impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
     where N: Eq,
-          T: BorrowMut<LongTree<N, L>>
+          T: BorrowMut<FlatTrie<N, L>>
 {
     pub fn leaf_mut(&mut self) -> Option<&mut L> {
         self.cursor.tree.borrow_mut().0.get_leaf_mut(self.move_to)
@@ -319,7 +319,7 @@ impl<'a, N, L, T> OccupiedEntry<'a, N, L, T>
 
 impl<'a, N, L, T> VacantEntry<'a, N, N, L, T>
     where N: Eq,
-          T: BorrowMut<LongTree<N, L>>
+          T: BorrowMut<FlatTrie<N, L>>
 {
     pub fn insert(self, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
         let insert_cursor = self.cursor.tree.borrow_mut().0.insert_nodes_after(self.insert_after, Some(self.node), leaf);
@@ -333,7 +333,7 @@ impl<'a, N, L, T> VacantEntry<'a, N, N, L, T>
 impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
     where N: Eq + Borrow<O>,
           O: ToOwned<Owned=N>,
-          T: BorrowMut<LongTree<N, L>>
+          T: BorrowMut<FlatTrie<N, L>>
 {
     pub fn insert_cloned(self, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
         let insert_cursor = self.cursor.tree.borrow_mut().0.insert_nodes_after(self.insert_after, Some(self.node.to_owned() ), leaf);
@@ -346,7 +346,7 @@ impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
 
 impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
     where N: Eq,
-          T: BorrowMut<LongTree<N, L>>
+          T: BorrowMut<FlatTrie<N, L>>
 {
     pub fn insert_node(self, node: N, leaf: Option<L>) -> OccupiedEntry<'a, N, L, T> {
         let insert_cursor = self.cursor.tree.borrow_mut().0.insert_nodes_after(self.insert_after, Some(node), leaf);
@@ -357,7 +357,7 @@ impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
     }
 }
 
-impl<N: Eq + Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for Cursor<N, L, T> {
+impl<N: Eq + Debug, L: Debug, T: Borrow<FlatTrie<N, L>>> Debug for Cursor<N, L, T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         f.debug_struct("Cursor")
             .field("depth", &self.raw.depth())
@@ -367,7 +367,7 @@ impl<N: Eq + Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for Cursor<N, L, 
     }
 }
 
-impl<'a, N: Eq + Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for OccupiedEntry<'a, N, L, T> {
+impl<'a, N: Eq + Debug, L: Debug, T: Borrow<FlatTrie<N, L>>> Debug for OccupiedEntry<'a, N, L, T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         f.debug_struct("OccupiedEntry")
             .field("depth", &self.cursor.depth())
@@ -377,7 +377,7 @@ impl<'a, N: Eq + Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for OccupiedE
     }
 }
 
-impl<'a, N: Eq + Debug, O: Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for VacantEntry<'a, N, O, L, T> {
+impl<'a, N: Eq + Debug, O: Debug, L: Debug, T: Borrow<FlatTrie<N, L>>> Debug for VacantEntry<'a, N, O, L, T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         f.debug_struct("VacantEntry")
             .field("depth", &self.cursor.depth())

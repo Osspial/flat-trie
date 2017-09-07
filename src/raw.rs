@@ -5,7 +5,7 @@ use std::iter::ExactSizeIterator;
 use odds::vec::VecExt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawTree<N: Eq, L> {
+pub struct RawTrie<N: Eq, L> {
     nodes: Vec<N>,
     /// The jumptions in the tree
     jumps: Vec<Jump>,
@@ -44,9 +44,9 @@ struct Jump {
     depth: isize
 }
 
-impl<N: Eq, L> RawTree<N, L> {
-    pub fn new() -> RawTree<N, L> {
-        RawTree {
+impl<N: Eq, L> RawTrie<N, L> {
+    pub fn new() -> RawTrie<N, L> {
+        RawTrie {
             nodes: vec![],
             jumps: vec![Jump::default_root()],
             leaves: vec![]
