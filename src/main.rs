@@ -4,9 +4,10 @@ mod raw;
 
 use raw::*;
 
-use std::iter;
 use std::borrow::{Borrow, BorrowMut};
 use std::marker::PhantomData;
+
+use std::fmt::{self, Debug, Formatter};
 
 fn main() {
     let mut tree: LongTree<_, i32> = LongTree(RawTree::new());
@@ -22,6 +23,11 @@ fn main() {
         println!("{:#?}", cursor.tree);
         cursor.child("b").unwrap_occupied().prune();
         println!("{:#?}", cursor.tree);
+    }
+
+    {
+        let mut cursor = tree.cursor();
+        println!("{:?}", cursor.find_leaf_after_wrapping(83).unwrap());
     }
 
     let mut cursor = tree.cursor();
@@ -59,6 +65,7 @@ pub struct Cursor<N, L, T>
     _marker: PhantomData<(N, L)>
 }
 
+#[derive(Debug)]
 pub enum Entry<'a, N, O, L, T>
     where N: 'a + Eq,
           L: 'a,
@@ -217,19 +224,21 @@ impl<N, L, T> Cursor<N, L, T>
         }
     }
 
-    // pub fn find_leaf_after_wrapping<'a, M>(&'a mut self, leaf: &M) -> Result<Entry<'a, N, L, T>, &mut Self>
-    //     where M: Eq,
-    //           L: Borrow<M>
-    // {
-    //     let cursor_opt = self.tree.borrow().0.find_leaf_after_wrapping(self.raw, leaf);
-    //     match cursor_opt {
-    //         Some(raw) => {
-    //             self.raw = raw;
-    //             Ok(self)
-    //         },
-    //         None => Err(FindError::NodeNotFound)
-    //     }
-    // }
+    pub fn find_leaf_after_wrapping<'a, M>(&'a mut self, leaf: M) -> Result<OccupiedEntry<'a, N, L, T>, &mut Self>
+        where L: PartialEq<M>
+    {
+        let cursor_opt = self.tree.borrow().0.find_leaf_after_wrapping(self.raw, leaf);
+        match cursor_opt {
+            Some(raw) => {
+                self.raw = raw;
+                Ok(OccupiedEntry {
+                    cursor: self,
+                    move_to: raw
+                })
+            },
+            None => Err(self)
+        }
+    }
 }
 
 impl<'a, N, L, T> Entry<'a, N, N, L, T>
@@ -348,8 +357,32 @@ impl<'a, N, O, L, T> VacantEntry<'a, N, O, L, T>
     }
 }
 
-// impl<'a, N: Eq + Copy + Debug> Debug for LongTree<N> {
-//     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+impl<N: Eq + Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for Cursor<N, L, T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        f.debug_struct("Cursor")
+            .field("depth", &self.raw.depth())
+            .field("node", &self.tree.borrow().0.get_node(self.raw))
+            .field("leaf", &self.tree.borrow().0.get_leaf(self.raw))
+            .finish()
+    }
+}
 
-//     }
-// }
+impl<'a, N: Eq + Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for OccupiedEntry<'a, N, L, T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        f.debug_struct("OccupiedEntry")
+            .field("depth", &self.cursor.depth())
+            .field("node", &self.cursor.tree.borrow().0.get_node(self.move_to))
+            .field("leaf", &self.cursor.tree.borrow().0.get_leaf(self.move_to))
+            .finish()
+    }
+}
+
+impl<'a, N: Eq + Debug, O: Debug, L: Debug, T: Borrow<LongTree<N, L>>> Debug for VacantEntry<'a, N, O, L, T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        f.debug_struct("VacantEntry")
+            .field("depth", &self.cursor.depth())
+            .field("insert_after", &self.cursor.tree.borrow().0.get_node(self.insert_after))
+            .field("insert_with", &self.node)
+            .finish()
+    }
+}

@@ -275,16 +275,15 @@ impl<N: Eq, L> RawTree<N, L> {
         )
     }
 
-    fn find_leaf<M, I>(&self, leaf: &M, ranges: I) -> Option<RawCursor>
-        where M: Eq + ?Sized,
-              L: Borrow<M>,
+    fn find_leaf<M, I>(&self, leaf: M, ranges: I) -> Option<RawCursor>
+        where L: PartialEq<M>,
               I: IntoIterator<Item=Range<usize>>
     {
         let mut leaf_jump_index_opt = None;
         for (jump, jump_index) in ranges.into_iter().flat_map(|r| self.jumps[r.clone()].iter().zip(r)) {
             match jump.next_major_node {
                 MajorNode::Leaf{leaf_index} if leaf_index != -1 => {
-                    if self.leaves[leaf_index as usize].borrow() == leaf {
+                    if *self.leaves[leaf_index as usize].borrow() == leaf {
                         leaf_jump_index_opt = Some(jump_index);
                         break;
                     }
@@ -303,9 +302,8 @@ impl<N: Eq, L> RawTree<N, L> {
         })
     }
 
-    pub fn find_leaf_after_wrapping<M>(&self, cursor: RawCursor, leaf: &M) -> Option<RawCursor>
-        where M: Eq + ?Sized,
-              L: Borrow<M>
+    pub fn find_leaf_after_wrapping<M>(&self, cursor: RawCursor, leaf: M) -> Option<RawCursor>
+        where L: PartialEq<M>
     {
         if self.leaves.len() == 0 {
             return None;
